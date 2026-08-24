@@ -716,6 +716,7 @@ class CanonicalTimelineStore
             db.bufferDao().repointLocalReadAnchors(loser.id, winner.id, merged.serverTime)
             dao.repointAliases(loser.id, winner.id)
             dao.repointObservations(loser.id, winner.id)
+            dao.compactObservations(winner.id)
             dao.repointReplies(loser.id, winner.id)
             db.composerDraftDao().repointReplies(loser.id, winner.id)
             dao.repointReactions(loser.id, winner.id)

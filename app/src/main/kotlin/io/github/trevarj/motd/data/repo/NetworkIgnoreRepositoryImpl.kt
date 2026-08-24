@@ -13,6 +13,7 @@ class NetworkIgnoreRepositoryImpl
     constructor(
         private val ignoreDao: NetworkIgnoreDao,
         private val bufferDao: BufferDao,
+        private val cache: NetworkIgnoreCache,
     ) : NetworkIgnoreRepository {
         override fun observeIgnores(networkId: Long): Flow<List<NetworkIgnoreEntity>> = ignoreDao.observeForNetwork(networkId)
 
@@ -31,18 +32,22 @@ class NetworkIgnoreRepositoryImpl
                             enabled = true,
                             createdAt = System.currentTimeMillis(),
                         ),
-                    ).let { }
+                    ).let { cache.invalidate(networkId) }
             }
 
         override suspend fun setIgnoreEnabled(
             id: Long,
             enabled: Boolean,
         ) {
+            val networkId = ignoreDao.networkIdFor(id)
             ignoreDao.setEnabled(id, enabled)
+            networkId?.let(cache::invalidate)
         }
 
         override suspend fun deleteIgnore(id: Long) {
+            val networkId = ignoreDao.networkIdFor(id)
             ignoreDao.delete(id)
+            networkId?.let(cache::invalidate)
         }
 
         override suspend fun setMuted(

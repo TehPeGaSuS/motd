@@ -162,6 +162,9 @@ interface NetworkIgnoreDao {
     @Query("SELECT * FROM network_ignores WHERE networkId = :networkId AND enabled = 1 ORDER BY id")
     suspend fun enabledForNetwork(networkId: Long): List<NetworkIgnoreEntity>
 
+    @Query("SELECT networkId FROM network_ignores WHERE id = :id")
+    suspend fun networkIdFor(id: Long): Long?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(ignore: NetworkIgnoreEntity): Long
 
@@ -1975,8 +1978,47 @@ interface CanonicalTimelineDao {
         eventId: TimelineEventId,
     )
 
-    @Insert
-    suspend fun insertObservation(observation: EventObservationEntity): Long
+    @Query(
+        """INSERT INTO event_observations(
+               networkId, timelineEventId, origin, connectionGeneration, receiveOrder, batchId,
+               timeProvenance, semanticFingerprint, batchExactOrdinal, observedAt
+           ) SELECT :networkId, :eventId, :origin, :connectionGeneration, :receiveOrder, :batchId,
+                    :timeProvenance, :semanticFingerprint, :batchExactOrdinal, :observedAt
+           WHERE NOT EXISTS (
+               SELECT 1 FROM event_observations
+               WHERE timelineEventId = :eventId AND origin = :origin AND timeProvenance = :timeProvenance
+           ) OR (:batchExactOrdinal IS NOT NULL AND NOT EXISTS (
+               SELECT 1 FROM event_observations
+               WHERE timelineEventId = :eventId AND batchExactOrdinal IS NOT NULL
+           ))""",
+    )
+    suspend fun insertObservationIfNovel(
+        networkId: Long,
+        eventId: TimelineEventId,
+        origin: ObservationOrigin,
+        connectionGeneration: Long?,
+        receiveOrder: Long,
+        batchId: String?,
+        timeProvenance: TimeProvenance,
+        semanticFingerprint: ByteArray,
+        batchExactOrdinal: Int?,
+        observedAt: Long,
+    ): Long
+
+    /** Keep one origin/provenance witness plus the first exact batch ordinal for each event. */
+    suspend fun insertObservation(observation: EventObservationEntity): Long =
+        insertObservationIfNovel(
+            observation.networkId,
+            observation.timelineEventId,
+            observation.origin,
+            observation.connectionGeneration,
+            observation.receiveOrder,
+            observation.batchId,
+            observation.timeProvenance,
+            observation.semanticFingerprint,
+            observation.batchExactOrdinal,
+            observation.observedAt,
+        )
 
     @Query("SELECT COALESCE(MAX(receiveOrder), 0) + 1 FROM event_observations WHERE networkId = :networkId")
     suspend fun nextReceiveOrder(networkId: Long): Long
@@ -2113,6 +2155,20 @@ interface CanonicalTimelineDao {
         loserId: TimelineEventId,
         winnerId: TimelineEventId,
     )
+
+    @Query(
+        """DELETE FROM event_observations
+           WHERE timelineEventId = :eventId
+             AND id NOT IN (
+                 SELECT MIN(id) FROM event_observations
+                 WHERE timelineEventId = :eventId GROUP BY origin, timeProvenance
+             )
+             AND id != COALESCE((
+                 SELECT MIN(id) FROM event_observations
+                 WHERE timelineEventId = :eventId AND batchExactOrdinal IS NOT NULL
+             ), -1)""",
+    )
+    suspend fun compactObservations(eventId: TimelineEventId)
 
     @Query("UPDATE messages SET replyToEventId = :winnerId WHERE replyToEventId = :loserId")
     suspend fun repointReplies(

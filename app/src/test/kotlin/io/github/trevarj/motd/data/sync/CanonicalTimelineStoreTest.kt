@@ -61,6 +61,23 @@ class CanonicalTimelineStoreTest {
         }
 
     @Test
+    fun repeatedDeliveryKeepsOnlySemanticObservationWitnesses() =
+        runTest {
+            val setup = openSetup("canonical-observation-compaction.db")
+            val observation =
+                ObservationSpec(ObservationOrigin.LIVE, "same", 20_000, TimeProvenance.SERVER_TAG)
+                    .observation(setup.networkId, setup.roomId)
+
+            repeat(100) { setup.store.ingest(observation) }
+            assertEquals(1, scalar(setup.db, "SELECT COUNT(*) FROM event_observations"))
+            assertEquals(
+                0,
+                scalar(setup.db, "SELECT batchExactOrdinal FROM event_observations WHERE batchExactOrdinal IS NOT NULL"),
+            )
+            setup.db.close()
+        }
+
+    @Test
     fun livePushAndHistoryPermutations_convergeAcrossDatabaseReopen() =
         runTest {
             val permutations =

@@ -28,6 +28,7 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.TimelineEventId
 import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.repo.NetworkIgnoreCache
 import io.github.trevarj.motd.data.repo.ignoredBy
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -117,10 +118,10 @@ class EventProcessor
         private val bufferStore: BufferStore = BufferStore(db),
         private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
         private val canonicalTimeline: CanonicalTimelineStore = CanonicalTimelineStore(db),
+        private val networkIgnoreCache: NetworkIgnoreCache = NetworkIgnoreCache(db.networkIgnoreDao()),
     ) : IrcEventSink {
         private val networkDao get() = db.networkDao()
         private val networkIdentityDao get() = db.networkIdentityDao()
-        private val networkIgnoreDao get() = db.networkIgnoreDao()
         private val bufferDao get() = db.bufferDao()
         private val messageDao get() = db.messageDao()
         private val memberDao get() = db.memberDao()
@@ -621,7 +622,7 @@ class EventProcessor
             val sourceSelfCandidate = e.isSelf || st.isSelfNick(e.source.nick)
             if (!sourceSelfCandidate &&
                 !(e.kind == IrcEvent.ChatKind.NOTICE && isServerSource(e.source.nick)) &&
-                ignoredBy(networkIgnoreDao.enabledForNetwork(networkId), e.source, st.identityRules)
+                ignoredBy(networkIgnoreCache.enabledForNetwork(networkId), e.source, st.identityRules)
             ) {
                 diagnostics.record("messages", "message_ignored_by_network_rule") {
                     mapOf(
@@ -3867,6 +3868,7 @@ class EventProcessor
         suspend fun evictNetwork(networkId: Long) {
             sequencer.withNetwork(networkId) {
                 states.remove(networkId)
+                networkIgnoreCache.invalidate(networkId)
                 rosterSnapshots.keys.removeAll { it.networkId == networkId }
                 activeHistoryMultiplicities.remove(networkId)
                 activeHistoryOccurrences.remove(networkId)
