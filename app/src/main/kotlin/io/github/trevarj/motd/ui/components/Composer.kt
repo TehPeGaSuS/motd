@@ -143,15 +143,10 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.emoji2.emojipicker.EmojiPickerView
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.format.IrcColor
-import io.github.trevarj.motd.irc.format.IrcFormatEdit
+import io.github.trevarj.motd.irc.format.IrcEditorDocument
 import io.github.trevarj.motd.irc.format.IrcTextStyle
-import io.github.trevarj.motd.irc.format.applyIrcColors
-import io.github.trevarj.motd.irc.format.clearIrcFormatting
-import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
-import io.github.trevarj.motd.irc.format.isIrcStyleSelected
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
-import io.github.trevarj.motd.irc.format.toggleIrcStyle
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
 import io.github.trevarj.motd.ui.chat.messageFormattingRange
 import io.github.trevarj.motd.ui.chat.searchSystemEmojis
@@ -391,20 +386,42 @@ fun Composer(
     autocomplete: (@Composable () -> Unit)? = null,
     ircFormattingEnabled: Boolean = false,
 ) {
-    val textFieldState = rememberTextFieldState(value.text, value.selection)
+    val initialEditor = remember { IrcEditorDocument.fromRaw(value.text, value.selection.start, value.selection.end) }
+    val textFieldState =
+        rememberTextFieldState(
+            initialText = initialEditor.first.text,
+            initialSelection = TextRange(initialEditor.second.first, initialEditor.second.last),
+        )
+    var editorDocument by remember { mutableStateOf(initialEditor.first) }
+    var lastEmittedRaw by remember { mutableStateOf(value.text) }
     val latestValue by rememberUpdatedState(value)
     val latestOnValueChange by rememberUpdatedState(onValueChange)
+
     LaunchedEffect(value.text, value.selection) {
-        if (textFieldState.text.toString() != value.text || textFieldState.selection != value.selection) {
+        if (value.text != lastEmittedRaw) {
+            val external = IrcEditorDocument.fromRaw(value.text, value.selection.start, value.selection.end)
+            editorDocument = external.first
+            lastEmittedRaw = value.text
             textFieldState.edit {
-                replace(0, length, value.text)
-                selection = value.selection
+                replace(0, length, external.first.text)
+                selection = TextRange(external.second.first, external.second.last)
             }
         }
     }
     LaunchedEffect(textFieldState) {
+        var previous = TextFieldValue(textFieldState.text.toString(), textFieldState.selection)
         snapshotFlow { TextFieldValue(textFieldState.text.toString(), textFieldState.selection) }.collect { current ->
-            if (current != latestValue) latestOnValueChange(current)
+            var nextDocument = editorDocument
+            if (current.text != nextDocument.text) nextDocument = nextDocument.replaceText(current.text)
+            if (current.selection != previous.selection || current.text != previous.text) {
+                nextDocument = nextDocument.moveCaret(current.selection.start)
+            }
+            editorDocument = nextDocument
+            val raw = nextDocument.toRawValue(current.selection.start, current.selection.end)
+            val outgoing = TextFieldValue(raw.text, TextRange(raw.selectionStart, raw.selectionEnd))
+            lastEmittedRaw = raw.text
+            if (outgoing != latestValue) latestOnValueChange(outgoing)
+            previous = current
         }
     }
     val editorValue = TextFieldValue(textFieldState.text.toString(), textFieldState.selection)
@@ -435,6 +452,13 @@ fun Composer(
         }
     }
 
+    fun publishDocument(next: IrcEditorDocument) {
+        editorDocument = next
+        val raw = next.toRawValue(editorValue.selection.start, editorValue.selection.end)
+        lastEmittedRaw = raw.text
+        latestOnValueChange(TextFieldValue(raw.text, TextRange(raw.selectionStart, raw.selectionEnd)))
+    }
+
     fun applyEditorValue(next: TextFieldValue) {
         textFieldState.edit {
             replace(0, length, next.text)
@@ -442,25 +466,21 @@ fun Composer(
         }
     }
 
-    fun applyFormatting(edit: IrcFormatEdit) {
-        applyEditorValue(TextFieldValue(edit.text, TextRange(edit.selectionStart, edit.selectionEnd)))
-    }
-
     fun toggle(style: IrcTextStyle) {
         selectedRange()?.let { selection ->
-            applyFormatting(toggleIrcStyle(editorValue.text, selection.start, selection.end, style))
+            publishDocument(editorDocument.toggleStyle(selection.start, selection.end, style))
         }
     }
 
     fun clearFormatting() {
         selectedRange()?.let { selection ->
-            applyFormatting(clearIrcFormatting(editorValue.text, selection.start, selection.end))
+            publishDocument(editorDocument.clearFormatting(selection.start, selection.end))
         }
     }
 
     fun openColorSheet() {
         val selection = selectedRange() ?: return
-        val state = ircStateAtRawOffset(editorValue.text, selection.start)
+        val state = if (selection.collapsed) editorDocument.pendingState else editorDocument.stateAtCaret(selection.start)
         colorSelection = selection
         selectedForeground = (state.foreground as? IrcColor.Numeric)?.code
         selectedBackground = (state.background as? IrcColor.Numeric)?.code
@@ -667,6 +687,7 @@ fun Composer(
                 ) {
                     ComposerFormattingToolbar(
                         value = editorValue,
+                        document = editorDocument,
                         onToggle = ::toggle,
                         onColor = ::openColorSheet,
                         onClear = ::clearFormatting,
@@ -746,6 +767,7 @@ fun Composer(
                             ) {
                                 ComposerTextField(
                                     state = textFieldState,
+                                    document = editorDocument,
                                     placeholder = placeholder,
                                     onFocusChanged = { inputFocused = it },
                                     onFocused = { dismissEmojiPicker() },
@@ -755,6 +777,12 @@ fun Composer(
                                     expanded = expanded,
                                     expandedHeight = expandedHeight,
                                     onColor = ::openColorSheet,
+                                    onToggleStyle = { style, start, end ->
+                                        publishDocument(editorDocument.toggleStyle(start, end, style))
+                                    },
+                                    onClearFormatting = { start, end ->
+                                        publishDocument(editorDocument.clearFormatting(start, end))
+                                    },
                                 )
 
                                 // A physical tap on the text field while the picker is open should
@@ -900,16 +928,13 @@ fun Composer(
                 colorSheetVisible = false
             },
             onRemove = {
-                applyFormatting(
-                    applyIrcColors(editorValue.text, colorSelection.start, colorSelection.end, null, null),
-                )
+                publishDocument(editorDocument.applyColors(colorSelection.start, colorSelection.end, null, null))
                 restoreFocusAfterColor = true
                 colorSheetVisible = false
             },
             onApply = {
-                applyFormatting(
-                    applyIrcColors(
-                        editorValue.text,
+                publishDocument(
+                    editorDocument.applyColors(
                         colorSelection.start,
                         colorSelection.end,
                         selectedForeground,
@@ -927,6 +952,7 @@ fun Composer(
 @Composable
 private fun ComposerFormattingToolbar(
     value: TextFieldValue,
+    document: IrcEditorDocument,
     onToggle: (IrcTextStyle) -> Unit,
     onColor: () -> Unit,
     onClear: () -> Unit,
@@ -950,7 +976,7 @@ private fun ComposerFormattingToolbar(
                 .testTag("chat_composer_format_toolbar"),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        fun selected(style: IrcTextStyle): Boolean = selection?.let { isIrcStyleSelected(value.text, it.start, it.end, style) } == true
+        fun selected(style: IrcTextStyle): Boolean = selection?.let { document.isStyleSelected(it.start, it.end, style) } == true
 
         @Composable
         fun FormatButton(
@@ -1415,6 +1441,7 @@ private fun EmojiPickerReplacementSurface(
 @Composable
 private fun ComposerTextField(
     state: TextFieldState,
+    document: IrcEditorDocument,
     placeholder: String,
     onFocusChanged: (Boolean) -> Unit,
     onFocused: () -> Unit,
@@ -1424,6 +1451,8 @@ private fun ComposerTextField(
     expanded: Boolean = false,
     expandedHeight: Dp = 148.dp,
     onColor: () -> Unit = {},
+    onToggleStyle: (IrcTextStyle, Int, Int) -> Unit = { _, _, _ -> },
+    onClearFormatting: (Int, Int) -> Unit = { _, _ -> },
 ) {
     fun allowedSelection(): TextRange? {
         val text = state.text.toString()
@@ -1435,26 +1464,16 @@ private fun ComposerTextField(
         }
     }
 
-    fun applyEdit(edit: IrcFormatEdit) {
-        state.edit {
-            replace(0, length, edit.text)
-            selection = TextRange(edit.selectionStart, edit.selectionEnd)
-        }
-    }
-
-    val raw = state.text.toString()
     val selection = allowedSelection()
     val hasSelection = selection?.collapsed == false
-    val boldSelected = selection?.let { isIrcStyleSelected(raw, it.start, it.end, IrcTextStyle.BOLD) } == true
+    val boldSelected = selection?.let { document.isStyleSelected(it.start, it.end, IrcTextStyle.BOLD) } == true
     val boldLabel = if (hasSelection && boldSelected) "Remove bold" else "Bold"
     val outputTransformation =
         if (ircFormattingEnabled) {
             OutputTransformation {
-                val formatted = parseIrcFormatting(toString())
-                for (index in formatted.rawText.lastIndex downTo 0) {
-                    if (formatted.rawToVisible[index] == formatted.rawToVisible[index + 1]) replace(index, index + 1, "")
+                if (toString() == document.text) {
+                    document.runs.forEach { run -> addStyle(run.state.toSpanStyle(), run.start, run.end) }
                 }
-                formatted.runs.forEach { run -> addStyle(run.state.toSpanStyle(), run.start, run.end) }
             }
         } else {
             null
@@ -1478,7 +1497,7 @@ private fun ComposerTextField(
                         item(key = "irc-${style.name}", label = label) {
                             close()
                             val current = allowedSelection() ?: return@item
-                            applyEdit(toggleIrcStyle(state.text.toString(), current.start, current.end, style))
+                            onToggleStyle(style, current.start, current.end)
                         }
                     }
                     styleItem(IrcTextStyle.BOLD, boldLabel)
@@ -1493,7 +1512,7 @@ private fun ComposerTextField(
                     item(key = "irc-clear", label = "Clear formatting") {
                         close()
                         val current = allowedSelection() ?: return@item
-                        applyEdit(clearIrcFormatting(state.text.toString(), current.start, current.end))
+                        onClearFormatting(current.start, current.end)
                     }
                 }
             }
