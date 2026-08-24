@@ -340,11 +340,6 @@ dependencies {
     testImplementation(libs.okhttp.mockwebserver)
 }
 
-// Compatibility alias: instrumentation uses the e2e build type, but older automation asks for debug.
-tasks.register("compileDebugAndroidTestKotlin") {
-    dependsOn("compileE2eAndroidTestKotlin")
-}
-
 // Generated JUnit cases are deterministic only for the selected profile/seed/replay inputs.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     listOf(
