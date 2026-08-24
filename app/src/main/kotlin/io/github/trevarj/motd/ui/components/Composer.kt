@@ -42,9 +42,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.contextmenu.builder.item
 import androidx.compose.foundation.text.contextmenu.modifier.appendTextContextMenuComponents
-import androidx.compose.foundation.text.contextmenu.modifier.filterTextContextMenuComponents
 import androidx.compose.foundation.text.input.OutputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -355,6 +355,7 @@ internal fun voiceGestureTarget(
     }
 
 /** Modern chat composer with embedded tools and a stable, separate primary send action. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Composer(
     value: TextFieldValue,
@@ -389,6 +390,24 @@ fun Composer(
     autocomplete: (@Composable () -> Unit)? = null,
     ircFormattingEnabled: Boolean = false,
 ) {
+    val textFieldState = rememberTextFieldState(value.text, value.selection)
+    val latestValue by rememberUpdatedState(value)
+    val latestOnValueChange by rememberUpdatedState(onValueChange)
+    LaunchedEffect(value.text, value.selection) {
+        if (textFieldState.text.toString() != value.text || textFieldState.selection != value.selection) {
+            textFieldState.edit {
+                replace(0, length, value.text)
+                selection = value.selection
+            }
+        }
+    }
+    LaunchedEffect(textFieldState) {
+        snapshotFlow { TextFieldValue(textFieldState.text.toString(), textFieldState.selection) }.collect { current ->
+            if (current != latestValue) latestOnValueChange(current)
+        }
+    }
+    val editorValue = TextFieldValue(textFieldState.text.toString(), textFieldState.selection)
+
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
     var expanded by remember { mutableStateOf(false) }
     var colorSheetVisible by remember { mutableStateOf(false) }
@@ -396,7 +415,7 @@ fun Composer(
     var colorSelection by remember { mutableStateOf(TextRange.Zero) }
     var selectedForeground by remember { mutableStateOf<Int?>(null) }
     var selectedBackground by remember { mutableStateOf<Int?>(null) }
-    val hasDraftText = plainIrcText(value.text).isNotEmpty()
+    val hasDraftText = plainIrcText(editorValue.text).isNotEmpty()
     val editorDensity = LocalDensity.current
     val expandedHeight =
         (
@@ -407,39 +426,46 @@ fun Composer(
         ).coerceAtLeast(148.dp)
 
     fun selectedRange(): TextRange? {
-        val allowed = if (ircFormattingEnabled) messageFormattingRange(value.text) else null
-        val selection = value.selection
+        val allowed = if (ircFormattingEnabled) messageFormattingRange(editorValue.text) else null
+        val selection = editorValue.selection
         val allowedEnd = allowed?.last?.plus(1) ?: return null
         return selection.takeIf {
             if (it.collapsed) it.start in allowed.first..allowedEnd else it.min >= allowed.first && it.max <= allowedEnd
         }
     }
 
+    fun applyEditorValue(next: TextFieldValue) {
+        textFieldState.edit {
+            replace(0, length, next.text)
+            selection = next.selection
+        }
+    }
+
     fun applyFormatting(edit: IrcFormatEdit) {
-        onValueChange(TextFieldValue(edit.text, TextRange(edit.selectionStart, edit.selectionEnd)))
+        applyEditorValue(TextFieldValue(edit.text, TextRange(edit.selectionStart, edit.selectionEnd)))
     }
 
     fun toggle(style: IrcTextStyle) {
         selectedRange()?.let { selection ->
-            applyFormatting(toggleIrcStyle(value.text, selection.start, selection.end, style))
+            applyFormatting(toggleIrcStyle(editorValue.text, selection.start, selection.end, style))
         }
     }
 
     fun clearFormatting() {
         selectedRange()?.let { selection ->
-            applyFormatting(clearIrcFormatting(value.text, selection.start, selection.end))
+            applyFormatting(clearIrcFormatting(editorValue.text, selection.start, selection.end))
         }
     }
 
     fun openColorSheet() {
         val selection = selectedRange() ?: return
-        val state = ircStateAtRawOffset(value.text, selection.start)
+        val state = ircStateAtRawOffset(editorValue.text, selection.start)
         colorSelection = selection
         selectedForeground = (state.foreground as? IrcColor.Numeric)?.code
         selectedBackground = (state.background as? IrcColor.Numeric)?.code
         colorSheetVisible = true
     }
-    val emojiQuery = activeEmojiQuery(value)
+    val emojiQuery = activeEmojiQuery(editorValue)
     val emojiSearchEntries = remember { systemEmojiSearchEntries() }
     val emojiSuggestions =
         remember(emojiQuery, emojiSearchEntries) {
@@ -611,7 +637,7 @@ fun Composer(
                         EmojiAutocompletePanel(
                             suggestions = emojiSuggestions,
                             onPick = { suggestion ->
-                                onValueChange(replaceEmojiQuery(value, emojiQuery, suggestion.emoji))
+                                applyEditorValue(replaceEmojiQuery(editorValue, emojiQuery, suggestion.emoji))
                             },
                         )
                     } else {
@@ -643,7 +669,7 @@ fun Composer(
                     exit = shrinkVertically(animationSpec = MotdMotion.contentSize),
                 ) {
                     ComposerFormattingToolbar(
-                        value = value,
+                        value = editorValue,
                         onToggle = ::toggle,
                         onColor = ::openColorSheet,
                         onClear = ::clearFormatting,
@@ -722,8 +748,7 @@ fun Composer(
                                     .onGloballyPositioned { onFieldPositioned(it.boundsInWindow()) },
                             ) {
                                 ComposerTextField(
-                                    value = value,
-                                    onValueChange = onValueChange,
+                                    state = textFieldState,
                                     placeholder = placeholder,
                                     onFocusChanged = { inputFocused = it },
                                     onFocused = { dismissEmojiPicker() },
@@ -796,7 +821,7 @@ fun Composer(
                         }
                     }
 
-                    val canSend = enabled && plainIrcText(value.text).isNotBlank()
+                    val canSend = enabled && plainIrcText(editorValue.text).isNotBlank()
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
@@ -860,7 +885,7 @@ fun Composer(
                     session = emojiPickerSession,
                     contentHeightPx = pickerContentHeightPx,
                     readImeContentHeightPx = readImeContentHeightPx,
-                    onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) },
+                    onPick = { emoji -> applyEditorValue(insertAtCursor(editorValue, emoji)) },
                 )
             }
         }
@@ -873,13 +898,13 @@ fun Composer(
             onForeground = { selectedForeground = it },
             onBackground = { selectedBackground = it },
             onCancel = {
-                onValueChange(value.copy(selection = colorSelection))
+                textFieldState.edit { selection = colorSelection }
                 restoreFocusAfterColor = true
                 colorSheetVisible = false
             },
             onRemove = {
                 applyFormatting(
-                    applyIrcColors(value.text, colorSelection.start, colorSelection.end, null, null),
+                    applyIrcColors(editorValue.text, colorSelection.start, colorSelection.end, null, null),
                 )
                 restoreFocusAfterColor = true
                 colorSheetVisible = false
@@ -887,7 +912,7 @@ fun Composer(
             onApply = {
                 applyFormatting(
                     applyIrcColors(
-                        value.text,
+                        editorValue.text,
                         colorSelection.start,
                         colorSelection.end,
                         selectedForeground,
@@ -1392,8 +1417,7 @@ private fun EmojiPickerReplacementSurface(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ComposerTextField(
-    value: TextFieldValue,
-    onValueChange: (TextFieldValue) -> Unit,
+    state: TextFieldState,
     placeholder: String,
     onFocusChanged: (Boolean) -> Unit,
     onFocused: () -> Unit,
@@ -1404,24 +1428,6 @@ private fun ComposerTextField(
     expandedHeight: Dp = 148.dp,
     onColor: () -> Unit = {},
 ) {
-    val state = rememberTextFieldState(value.text, value.selection)
-    val latestValue by rememberUpdatedState(value)
-    val latestOnValueChange by rememberUpdatedState(onValueChange)
-
-    LaunchedEffect(value.text, value.selection) {
-        if (state.text.toString() != value.text || state.selection != value.selection) {
-            state.edit {
-                replace(0, length, value.text)
-                selection = value.selection
-            }
-        }
-    }
-    LaunchedEffect(state) {
-        snapshotFlow { TextFieldValue(state.text.toString(), state.selection) }.collect { current ->
-            if (current != latestValue) latestOnValueChange(current)
-        }
-    }
-
     fun allowedSelection(): TextRange? {
         val text = state.text.toString()
         val allowed = if (ircFormattingEnabled) messageFormattingRange(text) else null
@@ -1457,13 +1463,7 @@ private fun ComposerTextField(
             null
         }
     val contextMenuModifier =
-        if (!ircFormattingEnabled) {
-            Modifier
-        } else if (expanded) {
-            // Expanded mode owns formatting actions; suppress the floating selection popup so it
-            // cannot cover the persistent toolbar.
-            Modifier.filterTextContextMenuComponents { false }
-        } else {
+        if (ircFormattingEnabled) {
             Modifier.appendTextContextMenuComponents {
                 if (hasSelection) {
                     separator()
@@ -1494,6 +1494,8 @@ private fun ComposerTextField(
                     }
                 }
             }
+        } else {
+            Modifier
         }
 
     BasicTextField(
