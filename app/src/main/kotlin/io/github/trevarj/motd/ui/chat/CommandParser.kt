@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.irc.format.IrcEditorDocument
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
 
@@ -195,6 +196,19 @@ fun parseCommand(raw: String): ChatCommand {
         return formatted.rawText.substring(rawStart, rawEnd)
     }
 
+    fun formattedRawLine(command: ChatCommand.RawLine): ChatCommand.RawLine {
+        val wireCommand = command.line.firstWord()
+        val arguments = command.line.afterFirstWord()
+        if (arguments.isEmpty()) return command
+        val document = IrcEditorDocument.fromRaw(trimmed).first
+        val visibleStart = document.text.length - arguments.length
+        val formattedArguments =
+            IrcEditorDocument(arguments, document.states.subList(visibleStart, document.text.length))
+                .toRawValue(0, 0)
+                .text
+        return command.copy(line = "$wireCommand $formattedArguments")
+    }
+
     if (command is ChatCommand.Message) {
         return if (command.text.startsWith("/me ")) {
             ChatCommand.Message("/me ${rawSuffix(command.text.removePrefix("/me "))}")
@@ -213,6 +227,7 @@ fun parseCommand(raw: String): ChatCommand {
         is ChatCommand.Kick -> command.copy(reason = command.reason?.let(::rawSuffix))
         is ChatCommand.Knock -> command.copy(reason = command.reason?.let(::rawSuffix))
         is ChatCommand.Ctcp -> command.copy(request = rawSuffix(command.request))
+        is ChatCommand.RawLine -> formattedRawLine(command)
         else -> command
     }
 }
@@ -242,6 +257,7 @@ internal fun messageFormattingRange(raw: String): IntRange? {
             is ChatCommand.Kick -> command.reason
             is ChatCommand.Knock -> command.reason
             is ChatCommand.Ctcp -> command.request
+            is ChatCommand.RawLine -> command.line.afterFirstWord().ifEmpty { null }
             else -> null
         } ?: return null
     val plainMessage = plainIrcText(messageText)

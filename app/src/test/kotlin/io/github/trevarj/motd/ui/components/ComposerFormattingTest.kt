@@ -38,6 +38,14 @@ class ComposerFormattingTest {
     }
 
     @Test
+    fun `custom command range allows formatting its text`() {
+        val raw = "/foo formatted text"
+        val range = messageFormattingRange(raw)!!
+
+        assertEquals("formatted text", raw.substring(range))
+    }
+
+    @Test
     fun `empty drafts and blank lines accept collapsed formatting`() {
         assertEquals(0 until 0, messageFormattingRange(""))
         assertEquals(0 until 2, messageFormattingRange(" \n"))

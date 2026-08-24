@@ -1,6 +1,10 @@
 package io.github.trevarj.motd.ui.chat
 
 import io.github.trevarj.motd.irc.format.IRC_BOLD
+import io.github.trevarj.motd.irc.format.IRC_RESET
+import io.github.trevarj.motd.irc.format.IrcTextStyle
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
+import io.github.trevarj.motd.irc.proto.IrcMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,7 +33,20 @@ class CommandParserTest {
             ChatCommand.Message("/me ${IRC_BOLD}waves$IRC_BOLD"),
             parseCommand("/${IRC_BOLD}me$IRC_BOLD ${IRC_BOLD}waves$IRC_BOLD"),
         )
-        assertEquals(ChatCommand.RawLine("WHOIS alice"), parseCommand("/raw ${IRC_BOLD}WHOIS alice$IRC_BOLD"))
+        assertEquals(
+            ChatCommand.RawLine("WHOIS ${IRC_BOLD}alice$IRC_RESET"),
+            parseCommand("/raw ${IRC_BOLD}WHOIS alice$IRC_BOLD"),
+        )
+    }
+
+    @Test fun unknown_command_preserves_formatted_text_on_the_wire() {
+        val raw = (parseCommand("/foo ${IRC_BOLD}hello$IRC_BOLD") as ChatCommand.RawLine).line
+        val sent = IrcMessage.parse(raw)
+        val text = parseIrcFormatting(sent.params.single())
+
+        assertEquals("FOO", sent.command)
+        assertEquals("hello", text.visibleText)
+        assertTrue(text.runs.all { it.state.enabled(IrcTextStyle.BOLD) })
     }
 
     @Test fun double_slash_escapes_to_literal_message() {
