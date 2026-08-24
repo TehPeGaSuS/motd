@@ -997,9 +997,8 @@ class IrcClient(
     suspend fun sendAtomicallyIfConnected(messages: List<IrcMessage>): Boolean {
         if (messages.isEmpty()) return false
         val t = transport ?: return false
-        outboundLock.withLock {
-            messages.forEach { t.send(it.serialize()) }
-        }
+        val lines = messages.map(IrcMessage::serialize)
+        outboundLock.withLock { t.sendAll(lines) }
         return true
     }
 

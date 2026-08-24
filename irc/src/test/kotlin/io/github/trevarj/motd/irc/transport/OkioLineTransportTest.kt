@@ -6,6 +6,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import okio.Buffer
+import okio.ForwardingSink
+import okio.buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -118,6 +121,24 @@ class OkioLineTransportTest {
             // readLine strips the CRLF; if CRLF weren't appended, readLine would block on EOF/return null.
             assertEquals("NICK motd", received)
         }
+
+    @Test
+    fun `batched writer frames every line and flushes once`() {
+        val output = Buffer()
+        var flushes = 0
+        val sink =
+            object : ForwardingSink(output) {
+                override fun flush() {
+                    flushes++
+                    super.flush()
+                }
+            }.buffer()
+
+        sink.writeIrcLines(listOf("ONE", "TWO", "THREE"))
+
+        assertEquals("ONE\r\nTWO\r\nTHREE\r\n", output.readUtf8())
+        assertEquals(1, flushes)
+    }
 
     @Test
     fun `multiple concurrent sends are serialized correctly`() =
