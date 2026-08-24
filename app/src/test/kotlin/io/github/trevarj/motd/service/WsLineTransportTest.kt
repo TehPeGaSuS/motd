@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.service
 
 import app.cash.turbine.test
+import io.github.trevarj.motd.irc.transport.MAX_IRC_LINE_BYTES
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import okhttp3.WebSocket
@@ -12,6 +14,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -29,6 +32,9 @@ class WsLineTransportTest {
 
     @Volatile private var serverSocket: WebSocket? = null
     private val opened = CountDownLatch(1)
+    private val clientClosed = CountDownLatch(1)
+
+    @Volatile private var clientCloseCode: Int? = null
 
     // Counts the frames the server observed so a missing frame fails fast instead of hanging.
     private val framesReceived = CountDownLatch(3)
@@ -59,6 +65,8 @@ class WsLineTransportTest {
                     code: Int,
                     reason: String,
                 ) {
+                    clientCloseCode = code
+                    clientClosed.countDown()
                     // Complete the close handshake so MockWebServer's queue drains on shutdown.
                     webSocket.close(code, null)
                 }
@@ -98,6 +106,55 @@ class WsLineTransportTest {
         }
 
     @Test
+    fun `exact inbound byte limit is accepted`() =
+        runBlocking {
+            val transport = WsLineTransport(url = wsUrl())
+            transport.connect()
+            assertTrue(opened.await(5, TimeUnit.SECONDS))
+            val line = "é".repeat(MAX_IRC_LINE_BYTES / 2)
+
+            withTimeout(5_000) {
+                transport.incoming.test {
+                    serverSocket!!.send(line)
+                    assertEquals(line, awaitItem())
+                }
+            }
+            transport.close()
+        }
+
+    @Test
+    fun `oversized multibyte frame fails instead of being retained`() =
+        runBlocking {
+            val transport = WsLineTransport(url = wsUrl())
+            transport.connect()
+            assertTrue(opened.await(5, TimeUnit.SECONDS))
+
+            withTimeout(5_000) {
+                transport.incoming.test {
+                    serverSocket!!.send("é".repeat(MAX_IRC_LINE_BYTES / 2 + 1))
+                    assertTrue(awaitError() is IOException)
+                }
+            }
+            assertTrue(clientClosed.await(5, TimeUnit.SECONDS))
+            assertEquals(1009, clientCloseCode)
+            transport.close()
+        }
+
+    @Test
+    fun `stalled inbound consumer disconnects on bounded queue overflow`() =
+        runBlocking {
+            val transport = WsLineTransport(url = wsUrl())
+            transport.connect()
+            assertTrue(opened.await(5, TimeUnit.SECONDS))
+
+            repeat(4_097) { serverSocket!!.send(":srv NOTICE * :$it") }
+
+            assertTrue(clientClosed.await(10, TimeUnit.SECONDS))
+            assertEquals(1013, clientCloseCode)
+            transport.close()
+        }
+
+    @Test
     fun `send transmits one WS text frame per line without CRLF`() =
         runBlocking {
             val transport = WsLineTransport(url = wsUrl())
@@ -113,6 +170,24 @@ class WsLineTransportTest {
             // instead of spinning until the JUnit/Gradle timeout.
             assertTrue("server did not observe 3 frames", framesReceived.await(5, TimeUnit.SECONDS))
             assertEquals(listOf("NICK motd", "USER motd 0 * :motd", "JOIN #a"), received.toList())
+            transport.close()
+        }
+
+    @Test
+    fun `outbound line is complete and byte bounded`() =
+        runBlocking {
+            val transport = WsLineTransport(url = wsUrl())
+            transport.connect()
+            assertTrue(opened.await(5, TimeUnit.SECONDS))
+            val line = "x".repeat(600)
+
+            transport.send(line)
+            withTimeout(5_000) {
+                while (received.isEmpty()) delay(10)
+            }
+            assertEquals(line, received.single())
+            val failure = runCatching { transport.send("é".repeat(MAX_IRC_LINE_BYTES / 2 + 1)) }.exceptionOrNull()
+            assertTrue(failure is IOException)
             transport.close()
         }
 

@@ -19,6 +19,9 @@ import java.net.Socket
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 
+/** Shared defensive ceiling for one IRC line, excluding CRLF. */
+const val MAX_IRC_LINE_BYTES = 16_384
+
 interface IrcTransport {
     /** Open the connection. Throws on failure. */
     suspend fun connect()
@@ -91,7 +94,6 @@ class OkioLineTransport(
 ) : IrcTransport {
     private companion object {
         const val CONNECT_TIMEOUT_MS = 15_000
-        const val LINE_LIMIT = 16_384L
     }
 
     private var socket: Socket? = null
@@ -149,7 +151,7 @@ class OkioLineTransport(
             while (true) {
                 val line =
                     try {
-                        src.readUtf8LineStrict(LINE_LIMIT)
+                        src.readUtf8LineStrict(MAX_IRC_LINE_BYTES.toLong())
                     } catch (e: EOFException) {
                         // Clean EOF: complete the flow normally.
                         break

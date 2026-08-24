@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.irc.transport.IrcTransport
+import io.github.trevarj.motd.irc.transport.MAX_IRC_LINE_BYTES
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -41,13 +42,14 @@ class WsLineTransport(
         const val SUBPROTOCOL = "text.ircv3.net"
         const val CONNECT_TIMEOUT_MS = 15_000L
 
-        // 512-byte IRC line limit (RFC 1459) incl. the CRLF the WS framing omits: 510 payload bytes.
-        const val MAX_LINE_BYTES = 512
+        const val INBOUND_CAPACITY = 4_096
+        const val CLOSE_MESSAGE_TOO_BIG = 1009
+        const val CLOSE_TRY_AGAIN_LATER = 1013
     }
 
-    // Inbound lines from onMessage; consumed once by `incoming`. Unlimited so the socket read
-    // thread never blocks on a slow consumer (matches OkioLineTransport's channelFlow behavior).
-    private val inbound = Channel<String>(Channel.UNLIMITED)
+    // OkHttp callbacks cannot suspend. Bound queued lines and disconnect on overflow rather than
+    // silently dropping protocol data or retaining an attacker-controlled backlog.
+    private val inbound = Channel<String>(INBOUND_CAPACITY)
 
     // Completes when the handshake opens (Unit) or fails (exception), so connect() can suspend.
     private val opened = CompletableDeferred<Unit>()
@@ -96,7 +98,12 @@ class WsLineTransport(
                 ) {
                     // Each text frame is exactly one IRC line (no CRLF). Defensively strip any trailing
                     // CRLF a lenient server might still send.
-                    inbound.trySend(text.removeSuffix("\r\n").removeSuffix("\n"))
+                    val line = text.removeSuffix("\r\n").removeSuffix("\n")
+                    if (line.toByteArray(Charsets.UTF_8).size > MAX_IRC_LINE_BYTES) {
+                        failInbound(webSocket, IOException("websocket IRC line exceeds $MAX_IRC_LINE_BYTES bytes"), CLOSE_MESSAGE_TOO_BIG)
+                    } else if (inbound.trySend(line).isFailure && !closed) {
+                        failInbound(webSocket, IOException("websocket IRC input queue overflow"), CLOSE_TRY_AGAIN_LATER)
+                    }
                 }
 
                 override fun onClosing(
@@ -141,12 +148,25 @@ class WsLineTransport(
 
     override suspend fun send(line: String) {
         val ws = webSocket ?: throw IllegalStateException("connect() not called")
-        // One IRC line per WS text message, no CRLF. Trim any caller-supplied CRLF and enforce the
-        // 512-byte line limit so WS framing preserves TCP line semantics.
-        val trimmed = line.removeSuffix("\r\n").removeSuffix("\n").take(MAX_LINE_BYTES)
+        // One complete IRC line per WS text message, no CRLF. Never truncate protocol data.
+        val trimmed = line.removeSuffix("\r\n").removeSuffix("\n")
+        if (trimmed.toByteArray(Charsets.UTF_8).size > MAX_IRC_LINE_BYTES) {
+            throw IOException("websocket IRC line exceeds $MAX_IRC_LINE_BYTES bytes")
+        }
         if (!ws.send(trimmed)) {
             throw IOException("websocket send failed (closed or backpressured)")
         }
+    }
+
+    private fun failInbound(
+        socket: WebSocket,
+        failure: IOException,
+        closeCode: Int,
+    ) {
+        if (closed) return
+        closed = true
+        inbound.close(failure)
+        socket.close(closeCode, failure.message?.take(123))
     }
 
     override suspend fun close() {
