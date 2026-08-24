@@ -40,6 +40,7 @@ import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.event.messageContextOrNull
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
+import io.github.trevarj.motd.irc.format.containsIrcFormatting
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -669,7 +670,12 @@ class EventProcessor
             val isRootServiceReply =
                 isBouncerServQuery && !sourceIsSelf &&
                     e.kind == IrcEvent.ChatKind.PRIVMSG && networkDao.byId(networkId)?.role == NetworkRole.BOUNCER_ROOT
-            val formatted = if (isBouncerServQuery) null else parseIrcFormatting(routedText)
+            val formatted =
+                if (isBouncerServQuery || !containsIrcFormatting(routedText)) {
+                    null
+                } else {
+                    parseIrcFormatting(routedText)
+                }
             val storedText = formatted?.visibleText ?: routedText
             val ircFormattedText = routedText.takeIf { formatted != null && it != storedText }
 

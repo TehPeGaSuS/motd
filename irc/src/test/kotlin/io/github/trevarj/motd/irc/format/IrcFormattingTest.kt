@@ -7,6 +7,22 @@ import org.junit.Test
 
 class IrcFormattingTest {
     @Test
+    fun formattingControlDetectionSkipsPlainPayloads() {
+        assertFalse(containsIrcFormatting("plain é 😀"))
+        listOf(
+            IRC_BOLD,
+            IRC_COLOR,
+            IRC_HEX_COLOR,
+            IRC_MONOSPACE,
+            IRC_RESET,
+            IRC_REVERSE,
+            IRC_ITALIC,
+            IRC_STRIKETHROUGH,
+            IRC_UNDERLINE,
+        ).forEach { control -> assertTrue(containsIrcFormatting("a${control}b")) }
+    }
+
+    @Test
     fun parsesEveryToggleResetAndOffsets() {
         val raw =
             "$IRC_BOLD${IRC_ITALIC}a$IRC_UNDERLINE" +
@@ -116,6 +132,17 @@ class IrcFormattingTest {
         assertTrue(result.stateAtVisible(0).bold)
         assertFalse(result.stateAtVisible(1).bold)
         assertTrue(result.stateAtVisible(2).bold)
+    }
+
+    @Test
+    fun splitComponentsHandleMultibyteCodePointsAndTransitions() {
+        val raw = "$IRC_BOLD" + "é 😀 words " + IRC_BOLD + "plain"
+        val components = splitIrcFormattedUtf8(raw, 11)
+
+        assertTrue(components.size > 1)
+        assertTrue(components.all { it.toByteArray().size <= 11 })
+        assertEquals("é 😀 words plain", components.joinToString("") { plainIrcText(it) })
+        assertTrue(components.all { parseIrcFormatting(it).activeState.isDefault })
     }
 
     @Test

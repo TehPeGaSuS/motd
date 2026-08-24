@@ -10,6 +10,25 @@ const val IRC_ITALIC: Char = '\u001D'
 const val IRC_STRIKETHROUGH: Char = '\u001E'
 const val IRC_UNDERLINE: Char = '\u001F'
 
+/** Cheap ingress check for callers that only need parsing when formatting controls exist. */
+fun containsIrcFormatting(text: String): Boolean =
+    text.any { char ->
+        when (char) {
+            IRC_BOLD,
+            IRC_COLOR,
+            IRC_HEX_COLOR,
+            IRC_MONOSPACE,
+            IRC_RESET,
+            IRC_REVERSE,
+            IRC_ITALIC,
+            IRC_STRIKETHROUGH,
+            IRC_UNDERLINE,
+            -> true
+
+            else -> false
+        }
+    }
+
 enum class IrcTextStyle(
     val control: Char,
 ) {
@@ -498,25 +517,37 @@ private fun splitVisibleUtf8(
     while (start < visible.length) {
         var end = start
         var lastSpaceEnd = -1
-        var candidate = ""
+        var bytes = 0
+        var previous = IrcFormatState()
         while (end < visible.length) {
-            val next = end + Character.charCount(visible.codePointAt(end))
-            val nextSerialized = serializeVisibleIrc(visible.substring(start, next), states.subList(start, next))
-            if (nextSerialized.toByteArray(Charsets.UTF_8).size > maxBytes) break
-            candidate = nextSerialized
+            val codePoint = visible.codePointAt(end)
+            val next = end + Character.charCount(codePoint)
+            val state = states[end]
+            // State controls and color digits are all single-byte UTF-8.
+            val transitionBytes = if (previous == state) 0 else stateTransition(previous, state).length
+            val codePointBytes = utf8Bytes(codePoint)
+            val closingResetBytes = if (state.isDefault) 0 else 1
+            if (bytes + transitionBytes + codePointBytes + closingResetBytes > maxBytes) break
+            bytes += transitionBytes + codePointBytes
+            previous = state
             end = next
             if (visible[end - 1] == ' ') lastSpaceEnd = end
         }
         require(end > start) { "maxBytes is smaller than one formatted UTF-8 code point" }
-        if (end < visible.length && lastSpaceEnd > start) {
-            end = lastSpaceEnd
-            candidate = serializeVisibleIrc(visible.substring(start, end), states.subList(start, end))
-        }
-        result += candidate
+        if (end < visible.length && lastSpaceEnd > start) end = lastSpaceEnd
+        result += serializeVisibleIrc(visible.substring(start, end), states.subList(start, end))
         start = end
     }
     return result
 }
+
+private fun utf8Bytes(codePoint: Int): Int =
+    when {
+        codePoint <= 0x7F -> 1
+        codePoint <= 0x7FF -> 2
+        codePoint <= 0xFFFF -> 3
+        else -> 4
+    }
 
 fun ircStateAtRawOffset(
     raw: String,

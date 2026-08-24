@@ -151,7 +151,31 @@ class EventProcessorTest {
             val rows = pagingList(buffer.id)
             assertEquals(1, rows.size)
             assertEquals("hello world", rows.single().text)
+            assertNull(rows.single().ircFormattedText)
             assertFalse(rows.single().hasMention)
+        }
+
+    @Test
+    fun formattedChatRetainsRawPayloadBesidePlainProjection() =
+        runTest {
+            val raw = "\u0002hello\u0002"
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx = ctx(msgid = "formatted"),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("alice"),
+                    target = "#chan",
+                    text = raw,
+                    isSelf = false,
+                    replyToMsgid = null,
+                ),
+            )
+
+            val room = requireNotNull(db.bufferDao().byName(networkId, "#chan"))
+            val row = pagingList(room.id).single()
+            assertEquals("hello", row.text)
+            assertEquals(raw, row.ircFormattedText)
         }
 
     @Test
