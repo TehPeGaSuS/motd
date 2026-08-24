@@ -32,6 +32,10 @@ enum class AddNetworkPhase { FORM, TESTING, FAILED }
 data class AddNetworkUiState(
     val kind: ConnectionChoice = ConnectionChoice.NETWORK,
     val bouncerKind: BouncerKind = BouncerKind.SOJU,
+    // ZNC already collects its own per-bouncer network name via zncLogin.network; this only
+    // covers the DIRECT and soju-root cases, where nothing today lets the user name the row
+    // before it's created.
+    val displayName: String = "",
     val server: ServerForm = ServerForm(),
     val auth: AuthForm = AuthForm(),
     val sojuLogin: SojuLoginForm = SojuLoginForm(),
@@ -142,6 +146,10 @@ class AddNetworkViewModel
                 )
         }
 
+        fun editDisplayName(name: String) {
+            _state.value = _state.value.copy(displayName = name)
+        }
+
         fun editAuth(auth: AuthForm) {
             _state.value = _state.value.copy(auth = auth)
         }
@@ -185,6 +193,7 @@ class AddNetworkViewModel
                             name =
                                 when {
                                     s.isZnc -> s.zncLogin.network.trim()
+                                    s.displayName.isNotBlank() -> s.displayName.trim()
                                     else -> networkPreset(s.presetId)?.displayName ?: s.server.host
                                 },
                         )

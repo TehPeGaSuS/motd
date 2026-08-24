@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -76,6 +77,7 @@ fun AddNetworkScreen(
         onSetKind = viewModel::setKind,
         onSetBouncerKind = viewModel::setBouncerKind,
         onSelectPreset = viewModel::selectPreset,
+        onDisplayNameChange = viewModel::editDisplayName,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
         onSojuLoginChange = viewModel::editSojuLogin,
@@ -98,6 +100,7 @@ fun AddNetworkContent(
     onSetKind: (ConnectionChoice) -> Unit,
     onSetBouncerKind: (BouncerKind) -> Unit,
     onSelectPreset: (NetworkPresetId) -> Unit,
+    onDisplayNameChange: (String) -> Unit,
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
     onSojuLoginChange: (SojuLoginForm) -> Unit,
@@ -169,6 +172,24 @@ fun AddNetworkContent(
                     }
                 }
                 SettingsGroup(title = stringResource(R.string.add_network_details_section)) {
+                    // ZNC already collects its own per-bouncer network name (zncLogin.network,
+                    // required for auth); this field only needs to exist for DIRECT/soju, which
+                    // otherwise fall back to the preset name or bare host until edited later.
+                    if (!state.isZnc) {
+                        OutlinedTextField(
+                            value = state.displayName,
+                            onValueChange = onDisplayNameChange,
+                            label = { Text(stringResource(R.string.network_settings_display_name)) },
+                            placeholder = {
+                                Text(
+                                    networkPreset(state.presetId)?.displayName
+                                        ?: state.server.host.ifBlank { stringResource(R.string.add_network_kind_network) },
+                                )
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("add_network_display_name"),
+                        )
+                    }
                     // Ease the height between the two form variants; the branch swap itself (and
                     // its field state reset) is unchanged from today.
                     Box(Modifier.animateContentSize(animationSpec = MotdMotion.contentSize)) {
@@ -401,6 +422,7 @@ private fun AddNetworkFormPreview() {
             onSetKind = {},
             onSetBouncerKind = {},
             onSelectPreset = {},
+            onDisplayNameChange = {},
             onServerChange = {},
             onAuthChange = {},
             onSojuLoginChange = {},
@@ -431,6 +453,7 @@ private fun AddNetworkFailedPreview() {
             onSetKind = {},
             onSetBouncerKind = {},
             onSelectPreset = {},
+            onDisplayNameChange = {},
             onServerChange = {},
             onAuthChange = {},
             onSojuLoginChange = {},

@@ -194,6 +194,35 @@ class AddNetworkViewModelTest {
         }
 
     @Test
+    fun direct_network_uses_entered_display_name_over_host() =
+        runTest {
+            val repo = FakeNetworkRepository()
+            val vm = vm(repo, FakeConnectionManager())
+            vm.fillValidDirect()
+            vm.editDisplayName("  My Home Network  ")
+
+            vm.submit(onOpenBouncerNetworks = { error("not a bouncer") }, onDone = {})
+            runCurrent()
+
+            val id = vm.state.value.networkId!!
+            assertEquals("My Home Network", repo.networks.getValue(id).name)
+        }
+
+    @Test
+    fun direct_network_falls_back_to_host_when_display_name_is_blank() =
+        runTest {
+            val repo = FakeNetworkRepository()
+            val vm = vm(repo, FakeConnectionManager())
+            vm.fillValidDirect()
+
+            vm.submit(onOpenBouncerNetworks = { error("not a bouncer") }, onDone = {})
+            runCurrent()
+
+            val id = vm.state.value.networkId!!
+            assertEquals("irc.libera.chat", repo.networks.getValue(id).name)
+        }
+
+    @Test
     fun soju_missing_password_or_nick_is_not_submittable() =
         runTest {
             val vm = vm(FakeNetworkRepository(), FakeConnectionManager())
