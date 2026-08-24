@@ -1,0 +1,5 @@
+- Compose and read IRC formatting: bold, italic, underline, monospace, colors, reverse, and more. Formatting survives drafts, replies, and split messages.
+- New Composer Tools strip groups Emoji and formatting controls; hide either independently.
+- Set custom timestamp patterns and per-chat avatar overrides.
+- Name networks while adding them.
+- Faster, steadier history sync, transport, uploads, audio, avatars, and large formatted messages, plus keyboard and composer fixes.
