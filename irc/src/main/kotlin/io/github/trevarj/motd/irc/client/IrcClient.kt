@@ -1006,7 +1006,10 @@ class IrcClient(
     /** Attach a label tag, suspend until the labeled response/ack batch completes. */
     suspend fun sendLabeled(msg: IrcMessage): List<IrcMessage> = sendLabeledResponse(msg).messages
 
-    private suspend fun sendLabeledResponse(msg: IrcMessage): CorrelatedResponse {
+    private suspend fun sendLabeledResponse(
+        msg: IrcMessage,
+        consumer: ((IrcMessage) -> Unit)? = null,
+    ): CorrelatedResponse {
         val t = transport ?: throw IrcDisconnectedException(msg.command, null)
         // Degrade without labeled-response: send unlabeled, complete immediately with empty list.
         if (!hasCap("labeled-response")) {
@@ -1015,7 +1018,7 @@ class IrcClient(
         }
         val label = labels.next()
         val deferred = CompletableDeferred<CorrelatedResponse>()
-        labels.register(label, msg.command, deferred)
+        labels.register(label, msg.command, deferred, consumer)
         val labeled = msg.copy(tags = msg.tags + ("label" to label))
         return try {
             sendSerialized(t, labeled)
@@ -1551,9 +1554,8 @@ class IrcClient(
         val msg = IrcMessage(command = "LIST", params = params)
 
         if (hasCap("labeled-response")) {
-            val response = sendLabeled(msg)
             val out = BoundedChannelListings(cap)
-            response.mapNotNull(::parseListLine).forEach(out::add)
+            sendLabeledResponse(msg) { message -> parseListLine(message)?.let(out::add) }
             return out.toList()
         }
 

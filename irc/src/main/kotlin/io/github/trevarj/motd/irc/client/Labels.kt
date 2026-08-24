@@ -67,6 +67,7 @@ internal class LabelCorrelator(
     private class Pending(
         val ircCommand: String,
         val deferred: CompletableDeferred<CorrelatedResponse>,
+        val consumer: ((IrcMessage) -> Unit)?,
     ) {
         // Non-null once this label opened a batch; collects everything under it.
         var batchRef: String? = null
@@ -91,9 +92,10 @@ internal class LabelCorrelator(
         label: String,
         ircCommand: String,
         deferred: CompletableDeferred<CorrelatedResponse>,
+        consumer: ((IrcMessage) -> Unit)? = null,
     ) {
         check(label !in byLabel) { "duplicate label: $label" }
-        byLabel[label] = Pending(ircCommand, deferred)
+        byLabel[label] = Pending(ircCommand, deferred, consumer)
     }
 
     /** Remove exactly this registration and every batch-ref alias it acquired. */
@@ -219,7 +221,10 @@ internal class LabelCorrelator(
 
         // Single-message response.
         removePending(label, pending)
-        pending.deferred.complete(CorrelatedResponse(listOf(msg), rootBatch = null))
+        pending.consumer?.invoke(msg)
+        pending.deferred.complete(
+            CorrelatedResponse(if (pending.consumer == null) listOf(msg) else emptyList(), rootBatch = null),
+        )
         return true
     }
 
@@ -251,6 +256,10 @@ internal class LabelCorrelator(
         pending: Pending,
         message: IrcMessage,
     ): Boolean {
+        pending.consumer?.let {
+            it(message)
+            return true
+        }
         if (pending.buffered.size >= maxBufferedMessages) {
             failPending(label, pending, "response exceeded $maxBufferedMessages buffered messages")
             return false

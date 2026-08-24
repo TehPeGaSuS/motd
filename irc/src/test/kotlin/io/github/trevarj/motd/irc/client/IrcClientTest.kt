@@ -1592,6 +1592,27 @@ class IrcClientTest {
         }
 
     @Test
+    fun `labeled LIST streams a hundred thousand rows into bounded top set`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft)
+            val result = clientScope().async { client.listChannels(cap = 2) }
+            runCurrent()
+
+            val label = responseLabel(ft.sent.last { it.contains("LIST") })
+            ft.feed("@label=$label BATCH +list draft/labeled-response")
+            repeat(100_000) { index ->
+                ft.feed("@batch=list :srv 322 motd #c$index $index :topic")
+                if (index % 1_000 == 0) runCurrent()
+            }
+            ft.feed("@batch=list :srv 323 motd :End of /LIST")
+            ft.feed("BATCH -list")
+            runCurrent()
+
+            assertEquals(listOf("#c99999", "#c99998"), result.await().map { it.name })
+        }
+
+    @Test
     fun `raw fallback collects 322s until 323 without labeled-response`() =
         runTest {
             val ft = FakeTransport()

@@ -35,5 +35,20 @@ class LabelCorrelatorTest {
             )
         }
 
+    @Test
+    fun `streaming response retains framing but no payload list`() =
+        runTest {
+            val correlator = LabelCorrelator(maxBufferedMessages = 1)
+            val response = CompletableDeferred<CorrelatedResponse>()
+            var consumed = 0
+            correlator.register("stream", "LIST", response) { consumed++ }
+            correlator.route(message("@label=stream BATCH +root labeled-response"))
+            repeat(100) { correlator.route(message("@batch=root :srv 322 me #c$it $it :topic")) }
+            correlator.route(message("BATCH -root"))
+
+            assertEquals(100, consumed)
+            assertTrue(response.await().messages.isEmpty())
+        }
+
     private fun message(line: String): IrcMessage = IrcMessage.parse(line)
 }
