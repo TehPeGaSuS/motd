@@ -42,6 +42,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.contextmenu.builder.item
 import androidx.compose.foundation.text.contextmenu.modifier.appendTextContextMenuComponents
+import androidx.compose.foundation.text.contextmenu.modifier.filterTextContextMenuComponents
 import androidx.compose.foundation.text.input.OutputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
@@ -1463,7 +1464,13 @@ private fun ComposerTextField(
             null
         }
     val contextMenuModifier =
-        if (ircFormattingEnabled) {
+        if (!ircFormattingEnabled) {
+            Modifier
+        } else if (expanded) {
+            // Expanded mode owns formatting actions; suppress the floating selection popup so it
+            // cannot cover the persistent toolbar.
+            Modifier.filterTextContextMenuComponents { false }
+        } else {
             Modifier.appendTextContextMenuComponents {
                 if (hasSelection) {
                     separator()
@@ -1494,8 +1501,6 @@ private fun ComposerTextField(
                     }
                 }
             }
-        } else {
-            Modifier
         }
 
     BasicTextField(
