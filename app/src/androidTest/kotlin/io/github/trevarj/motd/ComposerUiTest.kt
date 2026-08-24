@@ -15,7 +15,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
-import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -288,8 +287,9 @@ class ComposerUiTest {
     }
 
     @Test
-    fun strikethroughFormatsSelectionAndFutureInput() {
-        val draft = mutableStateOf(TextFieldValue("hello\nthere", TextRange(0, 11)))
+    fun clearFormattingIsTheOnlyStrikeoutToolbarAction() {
+        val initial = "${IRC_BOLD}hello\nthere$IRC_BOLD"
+        val draft = mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length)))
         compose.setContent {
             MotdTheme {
                 Composer(
@@ -303,22 +303,12 @@ class ComposerUiTest {
         }
 
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
-        compose.onNodeWithTag("chat_format_strike").performClick()
-        compose.runOnIdle {
-            assertTrue(parseIrcFormatting(draft.value.text).runs.all { it.state.strikethrough })
-        }
+        compose.onAllNodesWithTag("chat_format_strike").assertCountEquals(0)
         compose.onNodeWithTag("chat_format_clear").performClick()
         compose.runOnIdle {
-            assertTrue(parseIrcFormatting(draft.value.text).runs.all { it.state.isDefault })
-            draft.value = TextFieldValue("first\n", TextRange(6))
-        }
-        compose.waitForIdle()
-        compose.onNodeWithTag("chat_format_strike").performClick()
-        compose.onNodeWithTag("chat_composer_field").performTextInput("x")
-        compose.runOnIdle {
             val formatted = parseIrcFormatting(draft.value.text)
-            assertEquals("first\nx", formatted.visibleText)
-            assertTrue(formatted.stateAtVisible(formatted.visibleText.lastIndex).strikethrough)
+            assertEquals("hello\nthere", formatted.visibleText)
+            assertTrue(formatted.runs.all { it.state.isDefault })
         }
     }
 

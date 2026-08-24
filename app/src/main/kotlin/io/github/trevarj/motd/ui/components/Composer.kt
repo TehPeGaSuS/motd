@@ -59,7 +59,6 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.StrikethroughS
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Mood
 import androidx.compose.material3.Button
@@ -979,9 +978,6 @@ private fun ComposerFormattingToolbar(
         }
         FormatButton(IrcTextStyle.UNDERLINE, "Underline", Icons.Filled.FormatUnderlined, "chat_format_underline") {
             onToggle(IrcTextStyle.UNDERLINE)
-        }
-        FormatButton(IrcTextStyle.STRIKETHROUGH, "Strikethrough", Icons.Filled.StrikethroughS, "chat_format_strike") {
-            onToggle(IrcTextStyle.STRIKETHROUGH)
         }
         FormatButton(IrcTextStyle.MONOSPACE, "Monospace", Icons.Filled.Code, "chat_format_monospace") {
             onToggle(IrcTextStyle.MONOSPACE)
