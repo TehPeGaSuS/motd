@@ -11,7 +11,10 @@ git rev-parse --verify "$BASE^{commit}" >/dev/null
   exit 1
 }
 mapfile -t changed < <(git diff --name-only "$BASE"...HEAD)
-[ "${#changed[@]}" -gt 0 ] || { echo "No changes since $BASE"; exit 0; }
+[ "${#changed[@]}" -gt 0 ] || {
+  echo "No changes since $BASE"
+  exit 0
+}
 
 matches() { printf '%s\n' "${changed[@]}" | grep -Eq "$1"; }
 gradle() { nix develop -c ./gradlew "$@" --stacktrace; }
