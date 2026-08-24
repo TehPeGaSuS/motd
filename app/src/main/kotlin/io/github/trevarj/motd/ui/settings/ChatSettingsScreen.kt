@@ -90,6 +90,7 @@ fun ChatSettingsScreen(
         onAutoAwayMessage = viewModel::setAutoAwayMessage,
         onFoolsMode = viewModel::setFoolsMode,
         onShowComposerEmoji = viewModel::setShowComposerEmoji,
+        onShowComposerFormattingTools = viewModel::setShowComposerFormattingTools,
         onChatSoundsEnabled = viewModel::setChatSoundsEnabled,
         onVisibleReplyPrefix = viewModel::setVisibleReplyPrefix,
         onShowImages = viewModel::setShowImages,
@@ -120,6 +121,7 @@ fun ChatSettingsContent(
     onAutoAwayMessage: (String) -> Unit,
     onFoolsMode: (FoolsMode) -> Unit,
     onShowComposerEmoji: (Boolean) -> Unit,
+    onShowComposerFormattingTools: (Boolean) -> Unit,
     onChatSoundsEnabled: (Boolean) -> Unit,
     onVisibleReplyPrefix: (Boolean) -> Unit,
     onShowImages: (Boolean) -> Unit,
@@ -213,6 +215,14 @@ fun ChatSettingsContent(
                 checked = settings.showComposerEmoji,
                 onCheckedChange = onShowComposerEmoji,
                 switchTag = "settings_switch_composer_emoji",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_composer_formatting_tools),
+                subtitle = stringResource(R.string.settings_composer_formatting_tools_desc),
+                checked = settings.showComposerFormattingTools,
+                onCheckedChange = onShowComposerFormattingTools,
+                switchTag = "settings_switch_composer_formatting_tools",
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
@@ -476,6 +486,7 @@ private fun ChatSettingsPreview() {
             onAutoAwayMessage = {},
             onFoolsMode = {},
             onShowComposerEmoji = {},
+            onShowComposerFormattingTools = {},
             onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},
             onShowImages = {},

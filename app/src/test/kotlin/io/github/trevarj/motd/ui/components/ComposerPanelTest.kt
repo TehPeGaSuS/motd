@@ -7,6 +7,8 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ComposerPanelTest {
@@ -113,6 +115,20 @@ class ComposerPanelTest {
 
     @Test fun noPanelWhenBothAreClosed() {
         assertEquals(ComposerPanel.NONE, composerPanel(showEmoji = false, hasAutocomplete = false))
+    }
+
+    @Test
+    fun composerToolsFollowEnabledCapabilities() {
+        assertTrue(composerToolsAvailable(showEmojiTool = true, showFormattingTools = false, ircFormattingEnabled = false))
+        assertTrue(composerToolsAvailable(showEmojiTool = false, showFormattingTools = true, ircFormattingEnabled = true))
+        assertFalse(composerToolsAvailable(showEmojiTool = false, showFormattingTools = true, ircFormattingEnabled = false))
+        assertFalse(composerToolsAvailable(showEmojiTool = false, showFormattingTools = false, ircFormattingEnabled = true))
+    }
+
+    @Test
+    fun composerToolsPlusRotatesIntoClose() {
+        assertEquals(0f, composerToolsRotation(open = false))
+        assertEquals(45f, composerToolsRotation(open = true))
     }
 
     @Test

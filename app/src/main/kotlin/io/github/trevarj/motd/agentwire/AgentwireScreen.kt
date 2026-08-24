@@ -99,6 +99,8 @@ import kotlinx.serialization.json.JsonPrimitive
 fun AgentwireGateScreen(
     onBack: () -> Unit,
     showBack: Boolean,
+    showComposerEmoji: Boolean,
+    showComposerFormattingTools: Boolean,
     viewModel: AgentwireViewModel = hiltViewModel(),
     ordinaryChat: @Composable () -> Unit,
 ) {
@@ -115,7 +117,14 @@ fun AgentwireGateScreen(
         }
 
         else -> {
-            AgentwireScreen(state, viewModel, onBack, showBack)
+            AgentwireScreen(
+                state = state,
+                viewModel = viewModel,
+                onBack = onBack,
+                showBack = showBack,
+                showComposerEmoji = showComposerEmoji,
+                showComposerFormattingTools = showComposerFormattingTools,
+            )
         }
     }
 }
@@ -185,6 +194,8 @@ private fun AgentwireScreen(
     viewModel: AgentwireViewModel,
     onBack: () -> Unit,
     showBack: Boolean,
+    showComposerEmoji: Boolean,
+    showComposerFormattingTools: Boolean,
 ) {
     var sheet by remember { mutableStateOf<AgentwireSheet?>(null) }
     var questionRequestId by remember { mutableStateOf<String?>(null) }
@@ -421,6 +432,8 @@ private fun AgentwireScreen(
                         AgentwireComposer(
                             value = composer,
                             state = state,
+                            showComposerEmoji = showComposerEmoji,
+                            showComposerFormattingTools = showComposerFormattingTools,
                             onValueChange = { composer = it },
                             onSend = {
                                 viewModel.submit(composer.text)
@@ -686,6 +699,8 @@ private fun AgentwireBlocked(
 private fun AgentwireComposer(
     value: TextFieldValue,
     state: AgentwireUiState,
+    showComposerEmoji: Boolean,
+    showComposerFormattingTools: Boolean,
     onValueChange: (TextFieldValue) -> Unit,
     onSend: () -> Unit,
     onCancel: () -> Unit,
@@ -712,7 +727,8 @@ private fun AgentwireComposer(
                 enabled = state.connected && state.activeSid != null,
                 modifier = Modifier.testTag("agentwire_composer"),
                 placeholder = if (state.busy) "Queue or steer the running turn" else "Message the agent",
-                showEmojiButton = true,
+                showEmojiTool = showComposerEmoji,
+                showFormattingTools = showComposerFormattingTools,
                 // Voice and attachments stay on the shared composer boundary. They can be enabled
                 // when Agentwire defines safe attachment payloads instead of inventing a wire form.
                 voiceEnabled = false,

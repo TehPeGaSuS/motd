@@ -6,10 +6,15 @@ import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.PlatformTextInputSession
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextRange
@@ -68,11 +73,138 @@ class ComposerEditorStateTest {
         val field = compose.onNodeWithTag("chat_composer_field")
         field.performClick()
         compose.runOnIdle { assertEquals(1, inputSessions) }
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(1, inputSessions) }
         "flicker".forEach { character ->
             field.performTextInput(character.toString())
             compose.runOnIdle { assertEquals(1, inputSessions) }
         }
         compose.runOnIdle { assertEquals("flicker", draft.value.text) }
+    }
+
+    @Test
+    fun toolsFollowCapabilitiesAndExposeSelectedSemantics() {
+        val showEmoji = mutableStateOf(true)
+        val showFormatting = mutableStateOf(true)
+        val ircFormatting = mutableStateOf(false)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                Composer(
+                    value = TextFieldValue("x", TextRange(1)),
+                    onValueChange = {},
+                    onSend = {},
+                    enabled = true,
+                    showEmojiTool = showEmoji.value,
+                    showFormattingTools = showFormatting.value,
+                    onUploadDraft = {},
+                    ircFormattingEnabled = ircFormatting.value,
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription("Open composer tools").assertExists()
+        compose
+            .onNodeWithTag("chat_composer_tools")
+            .assertExists()
+            .assertIsNotSelected()
+            .performClick()
+        compose.onNodeWithContentDescription("Close composer tools").assertExists()
+        compose.onNodeWithTag("chat_composer_tools").assertIsSelected()
+        compose.onNodeWithTag("chat_composer_emoji").assertExists()
+        compose.onNodeWithTag("chat_format_bold").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_overflow").assertDoesNotExist()
+
+        compose.runOnIdle { showEmoji.value = false }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_tools").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+
+        compose.runOnIdle { ircFormatting.value = true }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_tools").assertExists().performClick()
+        compose.onNodeWithTag("chat_composer_emoji").assertDoesNotExist()
+        compose.onNodeWithTag("chat_format_bold").assertExists()
+        compose.onNodeWithTag("chat_composer_overflow").assertExists()
+
+        compose.runOnIdle { showFormatting.value = false }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_tools").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+
+        compose.runOnIdle { showEmoji.value = true }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_emoji").assertExists()
+        compose.onNodeWithTag("chat_format_bold").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_format_bold").assertExists()
+    }
+
+    @Test
+    fun emptyDraftToolsApplyPendingFormattingAndStayOpenWhileTyping() {
+        val draft = mutableStateOf(TextFieldValue())
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_format_bold").performClick()
+        compose.onNodeWithTag("chat_composer_field").performTextInput("x")
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+        compose.runOnIdle {
+            val parsed = parseIrcFormatting(draft.value.text)
+            assertEquals("x", parsed.visibleText)
+            assertTrue(
+                parsed.runs
+                    .single()
+                    .state
+                    .enabled(IrcTextStyle.BOLD),
+            )
+        }
+    }
+
+    @Test
+    fun compactAndExpandedToolsShareStateAndDismissOnSend() {
+        val draft = mutableStateOf(TextFieldValue("hello", TextRange(5)))
+        var sends = 0
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = { sends++ },
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, sends) }
     }
 
     @Test
@@ -90,11 +222,12 @@ class ComposerEditorStateTest {
             }
         }
 
-        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.onNodeWithTag("chat_format_color").performClick()
         compose.onNodeWithTag("chat_composer_color_sheet").assertIsDisplayed()
         compose.onNodeWithTag("chat_color_4").performClick()
         compose.onNodeWithTag("chat_composer_color_apply").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
 
         compose.runOnIdle {
             val parsed = parseIrcFormatting(draft.value.text)
@@ -124,10 +257,11 @@ class ComposerEditorStateTest {
             }
         }
 
-        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_tools").performTouchInput { click() }
         compose.onNodeWithTag("chat_format_color").performTouchInput { click() }
         compose.onNodeWithTag("chat_color_4").performTouchInput { click() }
         compose.onNodeWithTag("chat_composer_color_apply").performTouchInput { click() }
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
 
         compose.runOnIdle {
             val parsed = parseIrcFormatting(draft.value.text)
@@ -158,12 +292,20 @@ class ComposerEditorStateTest {
             }
         }
 
-        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_tools").performTouchInput { click() }
+        compose.runOnIdle { assertEquals(TextRange(0, text.length), draft.value.selection) }
         compose.onNodeWithTag("chat_format_bold").performTouchInput { click() }
         compose.runOnIdle {
-            assertTrue(parseIrcFormatting(draft.value.text).runs.all { it.state.enabled(IrcTextStyle.BOLD) })
+            val parsed = parseIrcFormatting(draft.value.text)
+            assertTrue(parsed.runs.all { it.state.enabled(IrcTextStyle.BOLD) })
+            assertEquals(0, parsed.visibleOffset(draft.value.selection.start))
+            assertEquals(text.length, parsed.visibleOffset(draft.value.selection.end))
         }
-        compose.onNodeWithTag("chat_format_clear").performTouchInput { click() }
+        compose
+            .onNodeWithTag("chat_format_clear")
+            .performScrollTo()
+            .assertIsEnabled()
+            .performTouchInput { click() }
         compose.runOnIdle {
             assertEquals(text, parseIrcFormatting(draft.value.text).visibleText)
             assertTrue(parseIrcFormatting(draft.value.text).runs.all { it.state.isDefault })
@@ -186,8 +328,8 @@ class ComposerEditorStateTest {
             }
         }
 
-        compose.onNodeWithTag("chat_composer_format_expand").performClick()
-        compose.onNodeWithTag("chat_format_clear").performClick()
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_format_clear").performScrollTo().performClick()
 
         compose.runOnIdle {
             val parsed = parseIrcFormatting(draft.value.text)

@@ -147,8 +147,10 @@ data class Settings(
     val avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
     /** Opt-in patterned chat background; NONE preserves the existing plain theme background. */
     val chatWallpaper: ChatWallpaper = ChatWallpaper.NONE,
-    /** Show the emoji (Mood) button in the composer; users who never use it can hide it. */
+    /** Show Emoji inside the shared composer tools strip. */
     val showComposerEmoji: Boolean = true,
+    /** Show IRC formatting actions in the compact composer tools strip. */
+    val showComposerFormattingTools: Boolean = true,
     /** Play subtle send/receive sounds for the currently open foreground chat. */
     val chatSoundsEnabled: Boolean = true,
     /** Window the first history sync of a network enumerates; chosen during soju onboarding. */
@@ -234,6 +236,8 @@ interface SettingsRepository {
     suspend fun setChatWallpaper(w: ChatWallpaper)
 
     suspend fun setShowComposerEmoji(show: Boolean)
+
+    suspend fun setShowComposerFormattingTools(show: Boolean)
 
     suspend fun setChatSoundsEnabled(enabled: Boolean)
 

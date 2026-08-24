@@ -319,6 +319,11 @@ class SettingsViewModel
                 settingsRepository.setShowComposerEmoji(show)
             }
 
+        fun setShowComposerFormattingTools(show: Boolean) =
+            viewModelScope.launch {
+                settingsRepository.setShowComposerFormattingTools(show)
+            }
+
         fun setChatSoundsEnabled(enabled: Boolean) =
             viewModelScope.launch {
                 settingsRepository.setChatSoundsEnabled(enabled)

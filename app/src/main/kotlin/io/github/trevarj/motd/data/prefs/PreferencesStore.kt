@@ -52,6 +52,7 @@ internal object PrefKeys {
     val AVATAR_STYLE = stringPreferencesKey("avatar_style")
     val CHAT_WALLPAPER = stringPreferencesKey("chat_wallpaper")
     val SHOW_COMPOSER_EMOJI = stringPreferencesKey("show_composer_emoji")
+    val SHOW_COMPOSER_FORMATTING_TOOLS = stringPreferencesKey("show_composer_formatting_tools")
     val CHAT_SOUNDS_ENABLED = stringPreferencesKey("chat_sounds_enabled")
     val HISTORY_SYNC_DEPTH = stringPreferencesKey("history_sync_depth")
     val AUTO_AWAY_ENABLED = stringPreferencesKey("auto_away_enabled")
@@ -135,6 +136,8 @@ class DataStoreSettingsRepository
                         prefs[PrefKeys.CHAT_WALLPAPER]?.let { runCatching { ChatWallpaper.valueOf(it) }.getOrNull() }
                             ?: ChatWallpaper.NONE,
                     showComposerEmoji = prefs[PrefKeys.SHOW_COMPOSER_EMOJI]?.toBooleanStrictOrNull() ?: true,
+                    showComposerFormattingTools =
+                        prefs[PrefKeys.SHOW_COMPOSER_FORMATTING_TOOLS]?.toBooleanStrictOrNull() ?: true,
                     chatSoundsEnabled = prefs[PrefKeys.CHAT_SOUNDS_ENABLED]?.toBooleanStrictOrNull() ?: true,
                     historySyncDepth =
                         prefs[PrefKeys.HISTORY_SYNC_DEPTH]
@@ -284,6 +287,10 @@ class DataStoreSettingsRepository
 
         override suspend fun setShowComposerEmoji(show: Boolean) {
             store.edit { it[PrefKeys.SHOW_COMPOSER_EMOJI] = show.toString() }
+        }
+
+        override suspend fun setShowComposerFormattingTools(show: Boolean) {
+            store.edit { it[PrefKeys.SHOW_COMPOSER_FORMATTING_TOOLS] = show.toString() }
         }
 
         override suspend fun setChatSoundsEnabled(enabled: Boolean) {

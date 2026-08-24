@@ -448,6 +448,7 @@ fun ChatScreen(
         messageSpacing = appearance.messageSpacing,
         bubbleCornerStyle = appearance.bubbleCornerStyle,
         showComposerEmoji = settings.showComposerEmoji,
+        showComposerFormattingTools = settings.showComposerFormattingTools,
         visibleReplyPrefix = replyConfig.visibleChannelPrefix,
         showImages = contentPreviews.showImages && directMediaAllowed,
         showLinkPreviews = contentPreviews.showLinkPreviews,
@@ -746,6 +747,7 @@ fun ChatContent(
     bubbleCornerStyle: io.github.trevarj.motd.data.prefs.BubbleCornerStyle =
         io.github.trevarj.motd.data.prefs.BubbleCornerStyle.ROUNDED,
     showComposerEmoji: Boolean = true,
+    showComposerFormattingTools: Boolean = true,
     visibleReplyPrefix: Boolean = false,
     showImages: Boolean = true,
     showLinkPreviews: Boolean = true,
@@ -2634,7 +2636,8 @@ fun ChatContent(
                                     isServerBuffer -> stringResource(R.string.chat_server_composer_hint)
                                     else -> stringResource(R.string.chat_composer_placeholder)
                                 },
-                            showEmojiButton = showComposerEmoji,
+                            showEmojiTool = showComposerEmoji,
+                            showFormattingTools = showComposerFormattingTools,
                             ircFormattingEnabled =
                                 !isServerBuffer &&
                                     !state.buffer?.displayName.equals("BouncerServ", ignoreCase = true),

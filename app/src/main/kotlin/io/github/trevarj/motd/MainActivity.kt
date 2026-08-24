@@ -198,6 +198,8 @@ class MainActivity :
                         PreloadChatWallpaperTile(appearance.wallpaper)
                         MotdNavGraph(
                             appearance = appearance,
+                            showComposerEmoji = settings.showComposerEmoji,
+                            showComposerFormattingTools = settings.showComposerFormattingTools,
                             navController = navController,
                             notificationTarget = notificationTarget,
                             onNotificationTargetHandled = ::consumeNotificationTarget,

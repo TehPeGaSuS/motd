@@ -396,6 +396,8 @@
     <string name="chat_day_yesterday">Yesterday</string>
     <string name="chat_composer_placeholder">Message</string>
     <string name="chat_composer_send">Send</string>
+    <string name="chat_composer_tools_open">Open composer tools</string>
+    <string name="chat_composer_tools_close">Close composer tools</string>
     <string name="chat_composer_emoji">Insert emoji</string>
     <string name="chat_composer_emoji_close">Close emoji picker</string>
     <string name="chat_composer_replying_to">Replying to %1$s</string>
@@ -684,8 +686,10 @@
     <string name="avatar_result_shared_cleared">Shared avatar cleared. Local avatar unchanged.</string>
     <string name="avatar_result_invalid">Couldn’t use that avatar.</string>
     <string name="avatar_result_failed">Couldn’t save avatar.</string>
-    <string name="settings_composer_emoji">Emoji button</string>
-    <string name="settings_composer_emoji_desc">Show the emoji button in the message composer.</string>
+    <string name="settings_composer_emoji">Emoji tool</string>
+    <string name="settings_composer_emoji_desc">Show Emoji in Composer Tools.</string>
+    <string name="settings_composer_formatting_tools">Formatting tools</string>
+    <string name="settings_composer_formatting_tools_desc">Show formatting actions in Composer Tools.</string>
     <string name="settings_chat_sounds">Chat sounds</string>
     <string name="settings_chat_sounds_desc">Play subtle sounds when sending or receiving in the open chat.</string>
     <string name="settings_reply_prefix">Visible reply prefix</string>

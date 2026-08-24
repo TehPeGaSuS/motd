@@ -11,9 +11,11 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -48,6 +50,7 @@ class ComposerUiTest {
             }
         }
 
+        compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.onNodeWithTag("chat_composer_emoji").performClick()
         compose.waitForIdle()
 
@@ -68,15 +71,18 @@ class ComposerUiTest {
             }
         }
 
+        compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.onNodeWithTag("chat_composer_emoji").performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("chat_composer_input_row").assertIsDisplayed()
         compose.onNodeWithTag("chat_composer_emoji_picker").assertIsDisplayed()
 
-        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        // Tools swaps the picker for the compact strip and restores the keyboard.
+        compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.waitForIdle()
 
         compose.onNodeWithTag("chat_composer_input_row").assertIsDisplayed()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
         // The picker stays inflated but reports no height, so closing it frees the space without
         // throwing away the populated emoji grid.
         compose.onNodeWithTag("chat_composer_emoji_picker").assertIsNotDisplayed()
@@ -102,11 +108,12 @@ class ComposerUiTest {
             }
         }
 
+        compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.onNodeWithTag("chat_composer_emoji").performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("chat_composer_emoji_grid").assertExists()
 
-        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.waitForIdle()
         // Retained across the close: reopening reveals the same view instead of re-inflating it and
         // re-running the async category load that made the picker flash blank.
@@ -134,6 +141,7 @@ class ComposerUiTest {
         }
         compose.waitForIdle()
 
+        compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.onNodeWithTag("chat_composer_emoji").performClick()
         compose.waitForIdle()
 
@@ -218,7 +226,7 @@ class ComposerUiTest {
                     onValueChange = { draft.value = it },
                     onSend = {},
                     enabled = true,
-                    showEmojiButton = false,
+                    showEmojiTool = false,
                     ircFormattingEnabled = true,
                     onAttachment = {},
                     onUploadDraft = { uploads++ },
@@ -315,7 +323,7 @@ class ComposerUiTest {
 
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
         compose.onAllNodesWithTag("chat_format_strike").assertCountEquals(0)
-        compose.onNodeWithTag("chat_format_clear").performClick()
+        compose.onNodeWithTag("chat_format_clear").performScrollTo().performClick()
         compose.runOnIdle {
             val formatted = parseIrcFormatting(draft.value.text)
             assertEquals("hello\nthere", formatted.visibleText)
@@ -356,6 +364,85 @@ class ComposerUiTest {
         }
         compose.waitForIdle()
         compose.onAllNodesWithTag("chat_composer_format_expand").assertCountEquals(0)
+    }
+
+    @Test
+    fun compactAndExpandedModesShareOneToolbar() {
+        val draft = mutableStateOf(TextFieldValue("hello", TextRange(5)))
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+    }
+
+    @Test
+    fun emojiReplacesExpandedToolsAndReturnsClosed() {
+        val draft = mutableStateOf(TextFieldValue("hello", TextRange(5)))
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        compose.onNodeWithTag("chat_composer_emoji_picker").assertIsDisplayed()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Expand rich editor").assertIsDisplayed()
+
+        compose.onNodeWithContentDescription("Close emoji picker").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_emoji_picker").assertIsNotDisplayed()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+    }
+
+    @Test
+    fun sendDismissesComposerTools() {
+        var sends = 0
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = TextFieldValue("hello", TextRange(5)),
+                    onValueChange = {},
+                    onSend = { sends++ },
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, sends) }
     }
 
     @Test

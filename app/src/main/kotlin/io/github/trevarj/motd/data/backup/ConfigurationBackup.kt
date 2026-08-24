@@ -424,6 +424,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setAvatarStyle(it.avatarStyle)
                 settingsRepository.setChatWallpaper(it.chatWallpaper)
                 settingsRepository.setShowComposerEmoji(it.showComposerEmoji)
+                settingsRepository.setShowComposerFormattingTools(it.showComposerFormattingTools)
                 settingsRepository.setChatSoundsEnabled(it.chatSoundsEnabled)
                 settingsRepository.setHistorySyncDepth(it.historySyncDepth)
                 settingsRepository.setAutoAwayEnabled(it.autoAwayEnabled)

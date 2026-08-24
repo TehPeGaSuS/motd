@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -49,6 +50,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.FormatBold
@@ -101,6 +103,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -178,6 +181,14 @@ internal fun composerPanel(
         hasAutocomplete -> ComposerPanel.AUTOCOMPLETE
         else -> ComposerPanel.NONE
     }
+
+internal fun composerToolsAvailable(
+    showEmojiTool: Boolean,
+    showFormattingTools: Boolean,
+    ircFormattingEnabled: Boolean,
+): Boolean = showEmojiTool || (showFormattingTools && ircFormattingEnabled)
+
+internal fun composerToolsRotation(open: Boolean): Float = if (open) 45f else 0f
 
 internal fun autocompletePopupPosition(
     anchorBounds: IntRect,
@@ -363,7 +374,8 @@ fun Composer(
     replyVisible: Boolean = reply != null,
     onCancelReply: () -> Unit = {},
     placeholder: String = stringResource(R.string.chat_composer_placeholder),
-    showEmojiButton: Boolean = true,
+    showEmojiTool: Boolean = true,
+    showFormattingTools: Boolean = true,
     onAttachment: (() -> Unit)? = null,
     onUploadDraft: (() -> Unit)? = onAttachment,
     voiceEnabled: Boolean = false,
@@ -427,13 +439,32 @@ fun Composer(
     val editorValue = TextFieldValue(textFieldState.text.toString(), textFieldState.selection)
 
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
+    var toolsOpen by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) }
+    var inputFocused by remember { mutableStateOf(false) }
     var colorSheetVisible by remember { mutableStateOf(false) }
     var restoreFocusAfterColor by remember { mutableStateOf(false) }
     var colorSelection by remember { mutableStateOf(TextRange.Zero) }
     var selectedForeground by remember { mutableStateOf<Int?>(null) }
     var selectedBackground by remember { mutableStateOf<Int?>(null) }
     val hasDraftText = plainIrcText(editorValue.text).isNotEmpty()
+    val showToolsButton = composerToolsAvailable(showEmojiTool, showFormattingTools, ircFormattingEnabled)
+    val toolsSurfaceVisible = toolsOpen || ircFormattingEnabled && expanded
+    // Toolbar touches can hide platform selection handles before their click callback runs. Retain
+    // the latest field-owned visible range so formatting still targets the user's selection.
+    var toolbarSelection by remember { mutableStateOf(editorValue.selection) }
+    LaunchedEffect(editorValue.selection, inputFocused, toolsSurfaceVisible) {
+        if (inputFocused || !toolsSurfaceVisible) toolbarSelection = editorValue.selection
+    }
+    val toolsRotation by
+        animateFloatAsState(
+            targetValue = composerToolsRotation(toolsSurfaceVisible),
+            animationSpec = MotdMotion.microFadeIn,
+            label = "composer_tools_rotation",
+        )
+    LaunchedEffect(showToolsButton) {
+        if (!showToolsButton) toolsOpen = false
+    }
     val editorDensity = LocalDensity.current
     val expandedHeight =
         (
@@ -463,12 +494,6 @@ fun Composer(
         textFieldState.edit {
             replace(0, length, next.text)
             selection = next.selection
-        }
-    }
-
-    fun toggle(style: IrcTextStyle) {
-        selectedRange()?.let { selection ->
-            publishDocument(editorDocument.toggleStyle(selection.start, selection.end, style))
         }
     }
 
@@ -505,7 +530,6 @@ fun Composer(
     val readImeContentHeightPx = rememberImeContentHeightReader(imeHeightPx)
     val imeInsetTracker = remember { ImeInsetTracker() }
     val compactPickerHeightPx = with(density) { COMPACT_EMOJI_PICKER_HEIGHT.roundToPx() }
-    var inputFocused by remember { mutableStateOf(false) }
     val latestInputFocused by rememberUpdatedState(inputFocused)
     // Height the retained picker is measured at. Non-zero once the picker has been opened at least
     // once, which is also what keeps the inflated view alive between sessions.
@@ -624,12 +648,21 @@ fun Composer(
 
     // Dismiss transient surfaces before leaving chat.
     BackHandler(
-        enabled = colorSheetVisible || expanded || emojiPickerSession?.phase == EmojiPickerPhase.OPEN,
+        enabled = colorSheetVisible || toolsSurfaceVisible || emojiPickerSession?.phase == EmojiPickerPhase.OPEN,
     ) {
         when {
-            colorSheetVisible -> colorSheetVisible = false
-            emojiPickerSession?.phase == EmojiPickerPhase.OPEN -> dismissEmojiPicker()
-            expanded -> expanded = false
+            colorSheetVisible -> {
+                colorSheetVisible = false
+            }
+
+            emojiPickerSession?.phase == EmojiPickerPhase.OPEN -> {
+                dismissEmojiPicker()
+            }
+
+            toolsSurfaceVisible -> {
+                toolsOpen = false
+                expanded = false
+            }
         }
     }
 
@@ -677,20 +710,29 @@ fun Composer(
                 }
 
                 AnimatedVisibility(
-                    visible = ircFormattingEnabled && expanded,
+                    visible = toolsSurfaceVisible,
                     enter = expandVertically(animationSpec = MotdMotion.contentSize),
                     exit = shrinkVertically(animationSpec = MotdMotion.contentSize),
                 ) {
-                    ComposerFormattingToolbar(
-                        value = editorValue,
+                    ComposerToolsToolbar(
+                        value = editorValue.copy(selection = toolbarSelection),
                         document = editorDocument,
-                        onToggle = ::toggle,
+                        showEmoji = showEmojiTool,
+                        showFormatting = ircFormattingEnabled && (showFormattingTools || expanded),
+                        onEmoji = {
+                            toolsOpen = false
+                            expanded = false
+                            openEmojiPicker()
+                        },
+                        onToggle = { currentDocument, selection, style ->
+                            publishDocument(currentDocument.toggleStyle(selection.start, selection.end, style))
+                        },
                         onColor = ::openColorSheet,
                         onClear = { currentDocument, selection ->
                             publishDocument(currentDocument.clearFormatting(selection.start, selection.end))
                         },
                         onUploadDraft =
-                            onUploadDraft?.let { upload ->
+                            onUploadDraft?.takeIf { ircFormattingEnabled }?.let { upload ->
                                 {
                                     keyboard?.hide()
                                     focusManager.clearFocus(force = true)
@@ -714,42 +756,36 @@ fun Composer(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
                         Row(verticalAlignment = Alignment.Bottom) {
-                            if (showEmojiButton) {
+                            if (showToolsButton) {
                                 IconButton(
                                     onClick = {
-                                        when (emojiPickerSession?.phase) {
-                                            EmojiPickerPhase.OPEN -> {
-                                                dismissEmojiPicker()
-                                            }
-
-                                            EmojiPickerPhase.RESTORING_IME -> {
-                                                emojiPickerSession = emojiPickerSession?.let(::reopenEmojiPickerSession)
-                                                keyboard?.hide()
-                                            }
-
-                                            null -> {
-                                                openEmojiPicker()
-                                            }
+                                        if (toolsSurfaceVisible) {
+                                            toolsOpen = false
+                                            expanded = false
+                                        } else {
+                                            if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) dismissEmojiPicker()
+                                            toolsOpen = true
                                         }
                                     },
                                     modifier =
                                         Modifier
                                             .size(48.dp)
-                                            .testTag("chat_composer_emoji")
-                                            .semantics { selected = emojiPickerSession?.phase == EmojiPickerPhase.OPEN },
+                                            .testTag("chat_composer_tools")
+                                            .semantics { selected = toolsSurfaceVisible },
                                 ) {
                                     Icon(
-                                        Icons.Outlined.Mood,
+                                        Icons.Filled.Add,
                                         contentDescription =
                                             stringResource(
-                                                if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
-                                                    R.string.chat_composer_emoji_close
+                                                if (toolsSurfaceVisible) {
+                                                    R.string.chat_composer_tools_close
                                                 } else {
-                                                    R.string.chat_composer_emoji
+                                                    R.string.chat_composer_tools_open
                                                 },
                                             ),
+                                        modifier = Modifier.graphicsLayer { rotationZ = toolsRotation },
                                         tint =
-                                            if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
+                                            if (toolsSurfaceVisible) {
                                                 MaterialTheme.colorScheme.primary
                                             } else {
                                                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -860,6 +896,7 @@ fun Composer(
                                 FilledIconButton(
                                     onClick = {
                                         dismissEmojiPicker()
+                                        toolsOpen = false
                                         expanded = false
                                         onSend()
                                     },
@@ -950,10 +987,13 @@ fun Composer(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ComposerFormattingToolbar(
+private fun ComposerToolsToolbar(
     value: TextFieldValue,
     document: IrcEditorDocument,
-    onToggle: (IrcTextStyle) -> Unit,
+    showEmoji: Boolean,
+    showFormatting: Boolean,
+    onEmoji: () -> Unit,
+    onToggle: (IrcEditorDocument, TextRange, IrcTextStyle) -> Unit,
     onColor: (IrcEditorDocument, TextRange) -> Unit,
     onClear: (IrcEditorDocument, TextRange) -> Unit,
     onUploadDraft: (() -> Unit)?,
@@ -965,6 +1005,8 @@ private fun ComposerFormattingToolbar(
             allowed != null && allowedEnd != null &&
                 if (it.collapsed) it.start in allowed.first..allowedEnd else it.min >= allowed.first && it.max <= allowedEnd
         }
+    val currentDocument = rememberUpdatedState(document)
+    val currentSelection = rememberUpdatedState(selection)
     val haptics = LocalHapticFeedback.current
     var overflowExpanded by remember { mutableStateOf(false) }
     Row(
@@ -979,11 +1021,12 @@ private fun ComposerFormattingToolbar(
         fun selected(style: IrcTextStyle): Boolean = selection?.let { document.isStyleSelected(it.start, it.end, style) } == true
 
         @Composable
-        fun FormatButton(
-            style: IrcTextStyle?,
+        fun ToolButton(
             label: String,
             icon: androidx.compose.ui.graphics.vector.ImageVector,
             tag: String,
+            enabled: Boolean = true,
+            isSelected: Boolean = false,
             onClick: () -> Unit,
         ) {
             TooltipBox(
@@ -998,16 +1041,16 @@ private fun ComposerFormattingToolbar(
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onClick()
                     },
-                    enabled = selection != null,
+                    enabled = enabled,
                     modifier =
                         Modifier
                             .size(48.dp)
                             .testTag(tag)
-                            .semantics { selected = style?.let(::selected) == true },
+                            .semantics { selected = isSelected },
                     colors =
                         IconButtonDefaults.iconButtonColors(
                             containerColor =
-                                if (style?.let(::selected) == true) {
+                                if (isSelected) {
                                     MaterialTheme.colorScheme.secondaryContainer
                                 } else {
                                     Color.Transparent
@@ -1019,23 +1062,51 @@ private fun ComposerFormattingToolbar(
             }
         }
 
-        FormatButton(IrcTextStyle.BOLD, "Bold", Icons.Filled.FormatBold, "chat_format_bold") {
-            onToggle(IrcTextStyle.BOLD)
+        @Composable
+        fun FormatButton(
+            style: IrcTextStyle?,
+            label: String,
+            icon: androidx.compose.ui.graphics.vector.ImageVector,
+            tag: String,
+            onClick: () -> Unit,
+        ) {
+            ToolButton(
+                label = label,
+                icon = icon,
+                tag = tag,
+                enabled = selection != null,
+                isSelected = style?.let(::selected) == true,
+                onClick = onClick,
+            )
         }
-        FormatButton(IrcTextStyle.ITALIC, "Italic", Icons.Filled.FormatItalic, "chat_format_italic") {
-            onToggle(IrcTextStyle.ITALIC)
+
+        if (showEmoji) {
+            ToolButton(
+                label = stringResource(R.string.chat_composer_emoji),
+                icon = Icons.Outlined.Mood,
+                tag = "chat_composer_emoji",
+                onClick = onEmoji,
+            )
         }
-        FormatButton(IrcTextStyle.UNDERLINE, "Underline", Icons.Filled.FormatUnderlined, "chat_format_underline") {
-            onToggle(IrcTextStyle.UNDERLINE)
-        }
-        FormatButton(IrcTextStyle.MONOSPACE, "Monospace", Icons.Filled.Code, "chat_format_monospace") {
-            onToggle(IrcTextStyle.MONOSPACE)
-        }
-        FormatButton(null, "Color", Icons.Filled.FormatColorText, "chat_format_color") {
-            selection?.let { onColor(document, it) }
-        }
-        FormatButton(null, "Clear formatting", Icons.Filled.FormatClear, "chat_format_clear") {
-            selection?.let { onClear(document, it) }
+        if (showFormatting) {
+            FormatButton(IrcTextStyle.BOLD, "Bold", Icons.Filled.FormatBold, "chat_format_bold") {
+                currentSelection.value?.let { onToggle(currentDocument.value, it, IrcTextStyle.BOLD) }
+            }
+            FormatButton(IrcTextStyle.ITALIC, "Italic", Icons.Filled.FormatItalic, "chat_format_italic") {
+                currentSelection.value?.let { onToggle(currentDocument.value, it, IrcTextStyle.ITALIC) }
+            }
+            FormatButton(IrcTextStyle.UNDERLINE, "Underline", Icons.Filled.FormatUnderlined, "chat_format_underline") {
+                currentSelection.value?.let { onToggle(currentDocument.value, it, IrcTextStyle.UNDERLINE) }
+            }
+            FormatButton(IrcTextStyle.MONOSPACE, "Monospace", Icons.Filled.Code, "chat_format_monospace") {
+                currentSelection.value?.let { onToggle(currentDocument.value, it, IrcTextStyle.MONOSPACE) }
+            }
+            FormatButton(null, "Color", Icons.Filled.FormatColorText, "chat_format_color") {
+                currentSelection.value?.let { onColor(currentDocument.value, it) }
+            }
+            FormatButton(null, "Clear formatting", Icons.Filled.FormatClear, "chat_format_clear") {
+                currentSelection.value?.let { onClear(currentDocument.value, it) }
+            }
         }
         onUploadDraft?.let { upload ->
             Box {

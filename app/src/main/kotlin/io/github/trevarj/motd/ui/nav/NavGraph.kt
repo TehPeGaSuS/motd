@@ -58,6 +58,8 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 @Composable
 fun MotdNavGraph(
     appearance: AppearanceConfig,
+    showComposerEmoji: Boolean,
+    showComposerFormattingTools: Boolean,
     navController: NavHostController = rememberNavController(),
     // Notification-tap deep-link: open the buffer and jump to the message. Null when absent.
     notificationTarget: NotificationTarget? = null,
@@ -162,6 +164,8 @@ fun MotdNavGraph(
                     AgentwireGateScreen(
                         onBack = { navController.popBackStack() },
                         showBack = showBack,
+                        showComposerEmoji = showComposerEmoji,
+                        showComposerFormattingTools = showComposerFormattingTools,
                     ) {
                         ChatScreen(
                             bufferId = route.bufferId,

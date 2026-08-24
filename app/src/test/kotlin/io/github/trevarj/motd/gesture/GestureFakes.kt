@@ -360,6 +360,8 @@ internal class FakeSettings(
 
     override suspend fun setShowComposerEmoji(show: Boolean) = Unit
 
+    override suspend fun setShowComposerFormattingTools(show: Boolean) = Unit
+
     override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
 
     override suspend fun setHistorySyncDepth(d: HistorySyncDepth) = Unit

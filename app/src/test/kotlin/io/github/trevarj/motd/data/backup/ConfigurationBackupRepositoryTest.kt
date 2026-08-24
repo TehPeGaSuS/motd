@@ -227,6 +227,46 @@ class ConfigurationBackupRepositoryTest {
             assertEquals("Iosevka Term.ttf", config.customFontName)
         }
 
+    @Test
+    fun oldSettingsBackupDefaultsComposerFormattingToolsOn() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val backup = repository(inMemoryDb())
+
+            settings.setShowComposerFormattingTools(false)
+            val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+            val oldRaw = raw.replace(Regex(""""showComposerFormattingTools"\s*:\s*false\s*,"""), "")
+            assertFalse(oldRaw.contains("showComposerFormattingTools"))
+
+            settings.setShowComposerFormattingTools(true)
+            backup.import(oldRaw, importMode = BackupImportMode.MERGE)
+            assertTrue(settings.settings.first().showComposerFormattingTools)
+        }
+
+    @Test
+    fun composerFormattingToolsRoundTripThroughSettingsBackup() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val backup = repository(inMemoryDb())
+
+            settings.setShowComposerEmoji(false)
+            settings.setShowComposerFormattingTools(false)
+            val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+
+            settings.setShowComposerEmoji(true)
+            settings.setShowComposerFormattingTools(true)
+            backup.import(raw, importMode = BackupImportMode.MERGE)
+
+            val restored = settings.settings.first()
+            assertFalse(restored.showComposerEmoji)
+            assertFalse(restored.showComposerFormattingTools)
+
+            settings.setShowComposerEmoji(true)
+            settings.setShowComposerFormattingTools(true)
+        }
+
     private fun repository(db: io.github.trevarj.motd.data.db.MotdDatabase): ConfigurationBackupRepositoryImpl {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val settings = DataStoreSettingsRepository(context)

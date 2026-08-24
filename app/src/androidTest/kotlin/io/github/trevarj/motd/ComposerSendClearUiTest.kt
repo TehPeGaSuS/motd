@@ -106,6 +106,18 @@ class ComposerSendClearUiTest {
     }
 
     @Test
+    fun backDismissesComposerToolsBeforeLeavingChat() {
+        setContent(draft = { ComposerDraftState("hello", hydrated = true, revision = 1) }) {}
+
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+    }
+
+    @Test
     fun delayedLanding_keepsFlightUntilPendingRowTakesOver() {
         val launchedAt = 1_000L
         val pages = MutableStateFlow(PagingData.from(emptyList<MessageEntity>()))
