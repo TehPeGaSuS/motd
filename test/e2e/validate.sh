@@ -14,7 +14,7 @@ bash -n "${scripts[@]}"
 }
 "$E2E_DIR/tests/fast-suite-classifier-test.sh"
 "$E2E_DIR/tests/fast-suite-privacy-test.sh"
-if command -v docker >/dev/null 2>&1; then
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   "$E2E_DIR/hermetic-stack.sh" validate
 else
   echo "SKIP: docker unavailable; Compose validation remains required in CI" >&2

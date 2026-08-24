@@ -38,16 +38,18 @@ verified libbox artifact.
 
 Use the authoritative local command matrix in
 [`.agents/testing.md`](../.agents/testing.md). Routine development runs the
-nearest test class, not a whole module:
+nearest test method, then its class, not a whole module:
 
 ```sh
 ./gradlew :app:testDebugUnitTest \
-  --tests '<fully-qualified-test-class>' --stacktrace
+  --tests '<fully-qualified-test-class.method>' --stacktrace
 ```
 
-Run `:app:assembleDebug` when an APK or packaging check is needed. Full module
-suites, release variants, lint, and E2E run in Required CI; use
-`:app:lintDebug` locally only for an explicit pre-push lint check.
+Run `:app:assembleDebug` only when an APK, resources, manifest, or packaging
+check is needed. After committing the final clean candidate, run
+`./tools/prepush.sh` once for path-selected deterministic CI parity. Full lint
+and emulator E2E remain hosted; use `:app:lintDebug` locally only for an explicit
+pre-push lint check.
 
 ## Device and E2E testing
 

@@ -29,10 +29,11 @@ connection ownership, or module boundaries.
    behavior in long-running work.
 4. Add or update tests at the same boundary. For UI changes, include semantics
    or stable tags when the interaction belongs in the device harness.
-5. Run only the nearest local checks from [`testing.md`](testing.md), inspect
-   the final diff, and report any verification that could not be performed.
-   Leave full suites, lint, release variants, and E2E to hosted CI unless the
-   matrix or maintainer explicitly requires them locally.
+5. While iterating, run only the nearest local checks from
+   [`testing.md`](testing.md). After the final commit, run `./tools/prepush.sh`
+   once on the clean tree, inspect the diff, and report any verification that
+   could not be performed. Leave emulator E2E to hosted CI unless the matrix or
+   maintainer explicitly requires it locally.
 
 ## Task guides
 

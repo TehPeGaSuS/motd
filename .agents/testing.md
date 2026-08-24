@@ -1,9 +1,10 @@
 # Testing and verification
 
-Run all Gradle commands through the repository Nix shell. Run the nearest useful
-check in each changed boundary; do not expand into full local suites. Hosted CI
-owns broad verification. Run `nix develop -c ./gradlew ktlintCheck` before handoff;
-use `ktlintFormat` to apply the enforced Kotlin style.
+Run all Gradle commands through the repository Nix shell. During development,
+run the nearest useful check in each changed boundary; do not expand every edit
+into full local suites. Run `nix develop -c ./gradlew ktlintCheck` before handoff;
+use `ktlintFormat` to apply the enforced Kotlin style. Before pushing a clean
+candidate commit, run `./tools/prepush.sh` once for path-selected CI parity.
 
 ## Command matrix
 
@@ -11,23 +12,40 @@ use `ktlintFormat` to apply the enforced Kotlin style.
 | --- | --- |
 | Documentation only | `git diff --check`; verify links, commands, and referenced paths |
 | Shell harness/config | `bash -n test/e2e/*.sh test/e2e/fixtures/*.sh test/e2e/hermetic/*/*.sh` plus the relevant dry run |
-| IRC parser/client/transport | Nearest `:irc` test class with `--tests` |
-| Android repositories, services, preferences, or ViewModels | Nearest `:app` test class with `--tests` |
-| Compose/resources/manifest | Nearest test when behavior changed, then `:app:assembleDebug` |
+| IRC parser/client/transport | Nearest `:irc` test method, then its class |
+| Android repositories, services, preferences, or ViewModels | Nearest `:app` test method, then its class |
+| Room entities/schema/migrations | Nearest database test; pre-push schema verification |
+| Compose Kotlin | Nearest behavior test; its Gradle task already compiles the app |
+| Resources/manifest/packaging | Nearest test when behavior changed, then `:app:assembleDebug` |
+| Instrumentation source | `:app:compileE2eAndroidTestKotlin`; emulator only when lower tiers cannot prove behavior |
 | Ordinary app user journey | Relevant unit/integration test; assemble only when an APK is needed |
-| Cross-module or release-sensitive work | Nearest tests in each affected module; rely on Required CI for full release parity |
+| Cross-module or release-sensitive work | Nearest tests while iterating, then `./tools/prepush.sh` once |
 
-Target one test class during local development:
+Target one method while iterating, then its class before handoff:
 
 ```sh
 nix develop -c ./gradlew :app:testDebugUnitTest \
-  --tests '<fully-qualified-test-class>' --stacktrace
+  --tests '<fully-qualified-test-class.method>' --stacktrace
 ```
 
-Use `:irc:test` instead for IRC tests. Run `:app:assembleDebug` when compilation,
+Use `:irc:test` instead for IRC tests. Run `:app:assembleDebug` only when
 resources, manifest, packaging, or an installable APK must be checked. Full
-module suites, release variants, lint, and E2E belong to Required CI. Run
-`:app:lintDebug` locally only for an explicit pre-push lint check.
+module suites, release variants, lint, and E2E belong to Required CI except for
+the path-selected pre-push checks. Run `:app:lintDebug` locally only for an
+explicit pre-push lint check.
+
+## Pre-push gate
+
+Commit checkpoints freely. Once the candidate tree is committed and clean, run:
+
+```sh
+./tools/prepush.sh
+```
+
+The script compares `HEAD` with `origin/main`, uses the exact commit as the PR
+fuzz seed, and runs only applicable deterministic non-emulator checks. Override
+the comparison base with `MOTD_PREFLIGHT_BASE=<ref>` when needed. A failing check
+must be fixed and committed before rerunning; do not stack more pushes on red CI.
 
 ## Deterministic generated tests
 
