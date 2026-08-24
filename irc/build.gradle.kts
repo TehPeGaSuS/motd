@@ -19,5 +19,6 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
         "MOTD_FUZZ_CASE",
         "MOTD_FUZZ_CASES",
         "MOTD_FUZZ_STEPS",
+        "MOTD_FUZZ_SHARD",
     ).forEach { name -> inputs.property(name, providers.environmentVariable(name).orElse("")) }
 }

@@ -31,8 +31,8 @@ module suites, release variants, lint, and E2E belong to Required CI. Run
 
 ## Deterministic generated tests
 
-Generated tests default locally to checked-in regressions plus one generated
-case per target. Required CI explicitly selects the PR workload and replaces the
+Generated tests default locally to checked-in regressions plus eight generated
+cases per target. Required CI explicitly selects the PR workload and replaces the
 seed with the candidate commit; `.github/workflows/fuzz.yml` selects the larger
 nightly profile.
 

@@ -217,7 +217,7 @@ private fun fuzzProfileValue(
     } else if (profile == "pr") {
         pr
     } else {
-        1
+        8
     }
 }
 
