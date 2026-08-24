@@ -84,9 +84,12 @@ version, seed, case, and fixture in that module's
   four isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP, while the parallel
   `component-ui` job runs every hermetic component instrumentation case outside the
   real-stack test file. `test/e2e/component-suite.sh` derives the expected count from those
-  source tests and verifies every case reports a result.
+  source tests and verifies every case reports a result. Documentation-only
+  changes run the path classifier and stable gate without booting Android jobs.
   Push the candidate commit and require the complete CI gate to pass before
-  tagging a release.
+  tagging a release. An `action_required` external-PR run is not evidence:
+  approve it and wait for the exact candidate or integration SHA to pass before
+  merging.
 - Use a physical device for hardware- or OS-integration evidence: input latency,
   scrolling performance, wallpaper/rendering quality, background lifecycle,
   notifications and UnifiedPush, system pickers, certificates outside the

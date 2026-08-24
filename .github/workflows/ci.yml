@@ -12,9 +12,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      runtime: ${{ steps.classify.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+      - name: Classify changed paths
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          runtime=true
+          if [[ -n "$BASE_SHA" && ! "$BASE_SHA" =~ ^0+$ ]] && git cat-file -e "$BASE_SHA^{commit}"; then
+            git diff --check "$BASE_SHA" "$GITHUB_SHA"
+            runtime=false
+            while IFS= read -r path; do
+              case "$path" in
+                *.md|LICENSE|docs/*|site/*|screenshots/*|fastlane/metadata/*) ;;
+                *) runtime=true; break ;;
+              esac
+            done < <(git diff --name-only "$BASE_SHA" "$GITHUB_SHA")
+          fi
+          echo "runtime=$runtime" >> "$GITHUB_OUTPUT"
+
   # Pure-JVM protocol module: fast, no Android SDK needed. Runs in parallel
   # with the app job so a slow/hanging app build never blocks irc feedback.
   irc:
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -40,6 +68,8 @@ jobs:
   # Android app: debug + release unit tests, lint, and APK assembly. The release APK is unsigned in
   # required CI; tag builds inject the production signing secrets in release.yml.
   app:
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -50,7 +80,6 @@ jobs:
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
-      - uses: ./.github/actions/setup-native-toolchain
       - name: Kotlin formatting
         run: ./gradlew ktlintCheck --stacktrace
       - name: App unit tests (debug and release)
@@ -94,6 +123,9 @@ jobs:
             echo "lint attempt $attempt failed; retrying" >&2
           done
           exit 1
+      # Native packaging is irrelevant to formatting and unit-test failures. Defer the large
+      # toolchain setup so deterministic red runs report sooner and avoid the download entirely.
+      - uses: ./.github/actions/setup-native-toolchain
       - name: Assemble debug and release APKs
         run: >-
           ./gradlew :app:assembleDebug :app:assembleRelease
@@ -106,6 +138,8 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
 
   headless:
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -215,6 +249,8 @@ jobs:
         run: ./test/e2e/hermetic-stack.sh down || true
 
   component-ui:
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -241,16 +277,26 @@ jobs:
 
   gate:
     if: always()
-    needs: [irc, app, headless, component-ui]
+    needs: [changes, irc, app, headless, component-ui]
     runs-on: ubuntu-latest
     steps:
-      - name: Require every CI tier
+      - name: Require every applicable CI tier
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RUNTIME_CHANGED: ${{ needs.changes.outputs.runtime }}
           IRC_RESULT: ${{ needs.irc.result }}
           APP_RESULT: ${{ needs.app.result }}
           HEADLESS_RESULT: ${{ needs.headless.result }}
           COMPONENT_RESULT: ${{ needs.component-ui.result }}
         run: |
+          test "$CHANGES_RESULT" = success
+          test "$RUNTIME_CHANGED" = true || {
+            test "$IRC_RESULT" = skipped
+            test "$APP_RESULT" = skipped
+            test "$HEADLESS_RESULT" = skipped
+            test "$COMPONENT_RESULT" = skipped
+            exit
+          }
           test "$IRC_RESULT" = success
           test "$APP_RESULT" = success
           test "$HEADLESS_RESULT" = success
