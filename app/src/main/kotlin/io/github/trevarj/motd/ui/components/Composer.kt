@@ -472,15 +472,11 @@ fun Composer(
         }
     }
 
-    fun clearFormatting() {
-        selectedRange()?.let { selection ->
-            publishDocument(editorDocument.clearFormatting(selection.start, selection.end))
-        }
-    }
-
-    fun openColorSheet() {
-        val selection = selectedRange() ?: return
-        val state = if (selection.collapsed) editorDocument.pendingState else editorDocument.stateAtCaret(selection.start)
+    fun openColorSheet(
+        currentDocument: IrcEditorDocument,
+        selection: TextRange,
+    ) {
+        val state = if (selection.collapsed) currentDocument.pendingState else currentDocument.stateAtCaret(selection.start)
         colorSelection = selection
         selectedForeground = (state.foreground as? IrcColor.Numeric)?.code
         selectedBackground = (state.background as? IrcColor.Numeric)?.code
@@ -690,7 +686,9 @@ fun Composer(
                         document = editorDocument,
                         onToggle = ::toggle,
                         onColor = ::openColorSheet,
-                        onClear = ::clearFormatting,
+                        onClear = { currentDocument, selection ->
+                            publishDocument(currentDocument.clearFormatting(selection.start, selection.end))
+                        },
                         onUploadDraft =
                             onUploadDraft?.let { upload ->
                                 {
@@ -776,7 +774,9 @@ fun Composer(
                                     ircFormattingEnabled = ircFormattingEnabled,
                                     expanded = expanded,
                                     expandedHeight = expandedHeight,
-                                    onColor = ::openColorSheet,
+                                    onColor = {
+                                        selectedRange()?.let { openColorSheet(editorDocument, it) }
+                                    },
                                     onToggleStyle = { style, start, end ->
                                         publishDocument(editorDocument.toggleStyle(start, end, style))
                                     },
@@ -954,8 +954,8 @@ private fun ComposerFormattingToolbar(
     value: TextFieldValue,
     document: IrcEditorDocument,
     onToggle: (IrcTextStyle) -> Unit,
-    onColor: () -> Unit,
-    onClear: () -> Unit,
+    onColor: (IrcEditorDocument, TextRange) -> Unit,
+    onClear: (IrcEditorDocument, TextRange) -> Unit,
     onUploadDraft: (() -> Unit)?,
 ) {
     val allowed = messageFormattingRange(value.text)
@@ -1031,8 +1031,12 @@ private fun ComposerFormattingToolbar(
         FormatButton(IrcTextStyle.MONOSPACE, "Monospace", Icons.Filled.Code, "chat_format_monospace") {
             onToggle(IrcTextStyle.MONOSPACE)
         }
-        FormatButton(null, "Color", Icons.Filled.FormatColorText, "chat_format_color", onColor)
-        FormatButton(null, "Clear formatting", Icons.Filled.FormatClear, "chat_format_clear", onClear)
+        FormatButton(null, "Color", Icons.Filled.FormatColorText, "chat_format_color") {
+            selection?.let { onColor(document, it) }
+        }
+        FormatButton(null, "Clear formatting", Icons.Filled.FormatClear, "chat_format_clear") {
+            selection?.let { onClear(document, it) }
+        }
         onUploadDraft?.let { upload ->
             Box {
                 IconButton(

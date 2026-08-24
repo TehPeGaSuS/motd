@@ -6,16 +6,19 @@ import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.PlatformTextInputSession
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_COLOR
 import io.github.trevarj.motd.irc.format.IRC_RESET
 import io.github.trevarj.motd.irc.format.IrcColor
+import io.github.trevarj.motd.irc.format.IrcTextStyle
 import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -122,9 +125,9 @@ class ComposerEditorStateTest {
         }
 
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
-        compose.onNodeWithTag("chat_format_color").performClick()
-        compose.onNodeWithTag("chat_color_4").performClick()
-        compose.onNodeWithTag("chat_composer_color_apply").performClick()
+        compose.onNodeWithTag("chat_format_color").performTouchInput { click() }
+        compose.onNodeWithTag("chat_color_4").performTouchInput { click() }
+        compose.onNodeWithTag("chat_composer_color_apply").performTouchInput { click() }
 
         compose.runOnIdle {
             val parsed = parseIrcFormatting(draft.value.text)
@@ -136,6 +139,34 @@ class ComposerEditorStateTest {
                     .filter { it.end > 2 && it.start < 5 }
                     .all { it.state.foreground == IrcColor.Numeric(4) },
             )
+        }
+    }
+
+    @Test
+    fun clearingFormattingAfterApplyingItInTheSameEditorSession() {
+        val text = "clearcheck"
+        val draft = mutableStateOf(TextFieldValue(text, TextRange(0, text.length)))
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_format_bold").performTouchInput { click() }
+        compose.runOnIdle {
+            assertTrue(parseIrcFormatting(draft.value.text).runs.all { it.state.enabled(IrcTextStyle.BOLD) })
+        }
+        compose.onNodeWithTag("chat_format_clear").performTouchInput { click() }
+        compose.runOnIdle {
+            assertEquals(text, parseIrcFormatting(draft.value.text).visibleText)
+            assertTrue(parseIrcFormatting(draft.value.text).runs.all { it.state.isDefault })
         }
     }
 
