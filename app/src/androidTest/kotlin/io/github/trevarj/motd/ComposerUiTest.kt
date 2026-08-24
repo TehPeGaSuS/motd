@@ -15,12 +15,12 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
-import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
@@ -261,8 +261,11 @@ class ComposerUiTest {
 
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
         compose.onNodeWithTag("chat_format_bold").performClick()
+        compose.onNodeWithTag("chat_composer_field").performTextInput("x")
         compose.runOnIdle {
-            assertTrue(ircStateAtRawOffset(draft.value.text, draft.value.selection.start).bold)
+            val formatted = parseIrcFormatting(draft.value.text)
+            assertEquals("first\nx", formatted.visibleText)
+            assertTrue(formatted.stateAtVisible(6).bold)
         }
     }
 
@@ -286,10 +289,11 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_composer_color_sheet").assertIsDisplayed()
         compose.onNodeWithTag("chat_color_4").performClick()
         compose.onNodeWithTag("chat_composer_color_apply").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("chat_composer_field").performTextInput("x")
         compose.runOnIdle {
             val formatted = parseIrcFormatting(draft.value.text)
-            assertEquals(6, formatted.visibleOffset(draft.value.selection.start))
-            assertEquals(IrcColor.Numeric(4), ircStateAtRawOffset(draft.value.text, draft.value.selection.start).foreground)
+            assertEquals("first\nx", formatted.visibleText)
+            assertEquals(IrcColor.Numeric(4), formatted.stateAtVisible(6).foreground)
         }
     }
 
@@ -322,6 +326,7 @@ class ComposerUiTest {
     @Test
     fun richComposer_expandsAndFormatsSelectionWhilePlainComposerStaysPlain() {
         val draft = mutableStateOf(TextFieldValue("hello\nthere", TextRange(0, 11)))
+        val formattingEnabled = mutableStateOf(true)
         compose.setContent {
             MotdTheme {
                 Composer(
@@ -329,7 +334,7 @@ class ComposerUiTest {
                     onValueChange = { draft.value = it },
                     onSend = {},
                     enabled = true,
-                    ircFormattingEnabled = true,
+                    ircFormattingEnabled = formattingEnabled.value,
                 )
             }
         }
@@ -344,11 +349,12 @@ class ComposerUiTest {
         }
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
         compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
-        compose.runOnIdle { assertEquals("hello\nthere", parseIrcFormatting(draft.value.text).visibleText) }
-
-        compose.setContent {
-            MotdTheme { Composer(TextFieldValue("plain"), {}, {}, true) }
+        compose.runOnIdle {
+            assertEquals("hello\nthere", parseIrcFormatting(draft.value.text).visibleText)
+            formattingEnabled.value = false
+            draft.value = TextFieldValue("plain")
         }
+        compose.waitForIdle()
         compose.onAllNodesWithTag("chat_composer_format_expand").assertCountEquals(0)
     }
 
