@@ -73,6 +73,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -144,6 +145,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
@@ -3602,47 +3604,51 @@ internal fun VoiceComposerPanel(
                                 "Recording. Slide left to cancel or swipe up to lock."
                             }
                     },
-            color = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 3.dp,
         ) {
-            Row(
-                Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Outlined.Mic, null)
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (recording.locked) "Recording locked" else "Recording",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        if (recording.locked) {
-                            "${formatAudioDuration(recording.elapsedMs)} · Tap stop to review"
-                        } else {
-                            "${formatAudioDuration(recording.elapsedMs)} · Slide left to cancel"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-                if (recording.locked) {
-                    IconButton(onClick = onCancelRecording, modifier = Modifier.testTag("voice_cancel_locked")) {
-                        Icon(Icons.Filled.Delete, "Cancel recording")
+            Column {
+                HorizontalDivider(thickness = Dp.Hairline, color = MaterialTheme.colorScheme.outlineVariant)
+                Row(
+                    Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.Mic, null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (recording.locked) "Recording locked" else "Recording",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            if (recording.locked) {
+                                "${formatAudioDuration(recording.elapsedMs)} · Tap stop to review"
+                            } else {
+                                "${formatAudioDuration(recording.elapsedMs)} · Slide left to cancel"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    IconButton(onClick = onStopRecording, modifier = Modifier.testTag("voice_stop_locked")) {
-                        Icon(Icons.Filled.Stop, "Stop and review recording")
-                    }
-                } else {
-                    Column(
-                        // Match IconButton's 48 dp slot so locking swaps controls without
-                        // changing the recording snackbar's height.
-                        modifier = Modifier.size(48.dp).testTag("voice_lock_hint"),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(Icons.Outlined.Lock, null, modifier = Modifier.size(20.dp))
-                        Text("Swipe up", style = MaterialTheme.typography.labelSmall)
+                    if (recording.locked) {
+                        IconButton(onClick = onCancelRecording, modifier = Modifier.testTag("voice_cancel_locked")) {
+                            Icon(Icons.Filled.Delete, "Cancel recording")
+                        }
+                        IconButton(onClick = onStopRecording, modifier = Modifier.testTag("voice_stop_locked")) {
+                            Icon(Icons.Filled.Stop, "Stop and review recording")
+                        }
+                    } else {
+                        Column(
+                            // Match IconButton's 48 dp slot so locking swaps controls without
+                            // changing the recording strip's height.
+                            modifier = Modifier.size(48.dp).testTag("voice_lock_hint"),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Icon(Icons.Outlined.Lock, null, modifier = Modifier.size(20.dp))
+                            Text("Swipe up", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }
@@ -3677,107 +3683,113 @@ internal fun VoiceComposerPanel(
         val previewPositionMs = playbackState.positionMs.takeIf { previewActive } ?: 0L
         Surface(
             modifier = modifier.fillMaxWidth().testTag("voice_preview_panel"),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 2.dp,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 3.dp,
         ) {
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Mic, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Voice message", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "${formatAudioDuration(staged.durationMs)} · ${staged.mimeType} · ${formatBytes(staged.sizeBytes)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    IconButton(onClick = { onPreview(preview) }, enabled = progress == null, modifier = Modifier.testTag("voice_preview_play")) {
-                        Icon(if (previewPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (previewPlaying) "Pause" else "Play")
-                    }
-                    IconButton(onClick = onDelete, enabled = progress == null, modifier = Modifier.testTag("voice_delete")) {
-                        Icon(Icons.Filled.Delete, "Delete")
-                    }
-                }
-                WaveformScrubber(
-                    value = (previewPositionMs.toFloat() / previewDurationMs.coerceAtLeast(1L)).coerceIn(0f, 1f),
-                    onValueChange = { fraction ->
-                        onPreviewSeek(preview, (fraction * previewDurationMs).toLong())
-                    },
-                    onValueChangeFinished = {},
-                    seed = preview.playbackId,
-                    enabled = progress == null && previewActive && !playbackState.loading,
-                    bufferedValue =
-                        if (previewActive && previewDurationMs > 0) {
-                            (playbackState.bufferedMs.toFloat() / previewDurationMs).coerceIn(0f, 1f)
-                        } else {
-                            0f
-                        },
-                    waveform = staged.waveform,
-                    modifier = Modifier.fillMaxWidth().testTag("voice_preview_scrubber"),
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Lock, null)
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Encrypt upload", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                        Text(
-                            if (staged.encrypted) {
-                                "The host cannot listen. IRC servers and bouncers can see the key in the link."
-                            } else {
-                                "Standard audio link. The host and anyone with the link can play it in any client."
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = staged.encrypted,
-                        onCheckedChange = { onToggleEncryption() },
-                        enabled = progress == null,
-                        modifier = Modifier.testTag("voice_encryption_toggle"),
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            destination?.backend?.label ?: "Soju file host",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            destination?.let(::backendRetention)
-                                ?: "Uses the file host advertised by this IRC network",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    TextButton(onClick = { destinationSheet = true }, enabled = progress == null, modifier = Modifier.testTag("voice_destination")) {
-                        Text("Change")
-                    }
-                }
-                when (progress) {
-                    is VoiceSendProgress.Uploading -> {
-                        if (progress.totalBytes != null && progress.totalBytes > 0) {
-                            LinearProgressIndicator(
-                                progress = { (progress.bytesSent.toFloat() / progress.totalBytes).coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxWidth(),
+            Column {
+                HorizontalDivider(thickness = Dp.Hairline, color = MaterialTheme.colorScheme.outlineVariant)
+                Column(
+                    Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Mic, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Voice message", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "${formatAudioDuration(staged.durationMs)} · ${staged.mimeType} · ${formatBytes(staged.sizeBytes)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        } else {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                        IconButton(onClick = { onPreview(preview) }, enabled = progress == null, modifier = Modifier.testTag("voice_preview_play")) {
+                            Icon(if (previewPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (previewPlaying) "Pause" else "Play")
+                        }
+                        IconButton(onClick = onDelete, enabled = progress == null, modifier = Modifier.testTag("voice_delete")) {
+                            Icon(Icons.Filled.Delete, "Delete")
                         }
                     }
-
-                    is VoiceSendProgress.Complete,
-                    null,
-                    -> {
-                        Unit
+                    WaveformScrubber(
+                        value = (previewPositionMs.toFloat() / previewDurationMs.coerceAtLeast(1L)).coerceIn(0f, 1f),
+                        onValueChange = { fraction ->
+                            onPreviewSeek(preview, (fraction * previewDurationMs).toLong())
+                        },
+                        onValueChangeFinished = {},
+                        seed = preview.playbackId,
+                        enabled = progress == null && previewActive && !playbackState.loading,
+                        bufferedValue =
+                            if (previewActive && previewDurationMs > 0) {
+                                (playbackState.bufferedMs.toFloat() / previewDurationMs).coerceIn(0f, 1f)
+                            } else {
+                                0f
+                            },
+                        waveform = staged.waveform,
+                        modifier = Modifier.fillMaxWidth().testTag("voice_preview_scrubber"),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Lock, null)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Encrypt upload", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text(
+                                if (staged.encrypted) {
+                                    "The host cannot listen. IRC servers and bouncers can see the key in the link."
+                                } else {
+                                    "Standard audio link. The host and anyone with the link can play it in any client."
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = staged.encrypted,
+                            onCheckedChange = { onToggleEncryption() },
+                            enabled = progress == null,
+                            modifier = Modifier.testTag("voice_encryption_toggle"),
+                        )
                     }
-                }
-                Button(onClick = onSend, enabled = progress == null, modifier = Modifier.fillMaxWidth().testTag("voice_send")) {
-                    Icon(Icons.Outlined.CloudUpload, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Send")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                destination?.backend?.label ?: "Soju file host",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                destination?.let(::backendRetention)
+                                    ?: "Uses the file host advertised by this IRC network",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = { destinationSheet = true }, enabled = progress == null, modifier = Modifier.testTag("voice_destination")) {
+                            Text("Change")
+                        }
+                    }
+                    when (progress) {
+                        is VoiceSendProgress.Uploading -> {
+                            if (progress.totalBytes != null && progress.totalBytes > 0) {
+                                LinearProgressIndicator(
+                                    progress = { (progress.bytesSent.toFloat() / progress.totalBytes).coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            } else {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+
+                        is VoiceSendProgress.Complete,
+                        null,
+                        -> {
+                            Unit
+                        }
+                    }
+                    Button(onClick = onSend, enabled = progress == null, modifier = Modifier.fillMaxWidth().testTag("voice_send")) {
+                        Icon(Icons.Outlined.CloudUpload, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Send")
+                    }
                 }
             }
         }
