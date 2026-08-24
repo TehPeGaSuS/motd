@@ -16,10 +16,10 @@ automation in `.github/workflows/release.yml` is authoritative.
 5. Confirm the four signing secrets exist in GitHub: `KEYSTORE_BASE64`,
    `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`.
 6. Write `fastlane/metadata/android/en-US/changelogs/<motdVersionCode>.txt` for
-   the new version code. No repo script reads `fastlane/`, so a missing file
-   fails nothing locally or in CI—it only surfaces as a blank "What's New" on
-   the F-Droid listing, which reads `fastlane/` straight from this repository.
-   Keep it user-facing and under 500 characters.
+   the new version code. The release workflow uses this as the GitHub release's
+   detailed "What's new" section, and F-Droid reads the same file straight from
+   this repository. A missing or empty file fails the release job. Keep it
+   user-facing and under 500 characters.
 
 ## Cut the release
 
@@ -44,8 +44,9 @@ E2E runs manually/nightly. Neither currently gates a release because the hosted
 managed emulator can fail in System UI before MOTD starts. The release job still
 runs the FOSS release build, tests, and lint.
 
-The release description should contain a changelog of commits since
-the last version.
+The release description starts with the same detailed, user-facing changelog
+shown on F-Droid, followed by source/license details and GitHub's generated full
+changelog since the previous version.
 
 ## F-Droid
 

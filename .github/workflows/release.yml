@@ -74,9 +74,24 @@ jobs:
             "${{ github.ref_name }}" \
             app/build/outputs/apk/release/app-release.apk \
             release-assets
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          changelog="fastlane/metadata/android/en-US/changelogs/${MOTD_VERSION_CODE}.txt"
+          [[ -s "$changelog" ]] || {
+            echo "missing F-Droid changelog: $changelog" >&2
+            exit 1
+          }
+          {
+            printf "## What's new\n\n"
+            cat "$changelog"
+            printf '\n\n'
+            cat release-assets/release-compliance.md
+          } > release-assets/release-notes.md
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          body_path: release-assets/release-compliance.md
+          body_path: release-assets/release-notes.md
           fail_on_unmatched_files: true
           files: |
             release-assets/motd-${{ github.ref_name }}-foss.apk
