@@ -229,9 +229,7 @@ class AddNetworkViewModel
                                 _state.value = _state.value.copy(phase = AddNetworkPhase.FAILED, error = cs.reason)
                             }
 
-                            else -> {
-                                Unit
-                            }
+                            else -> {}
                         }
                     }
                 }

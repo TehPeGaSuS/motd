@@ -236,9 +236,7 @@ fun AddNetworkContent(
                         )
                     }
 
-                    AddNetworkPhase.FORM -> {
-                        Unit
-                    }
+                    AddNetworkPhase.FORM -> {}
                 }
             }
         }
