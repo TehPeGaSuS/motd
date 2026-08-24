@@ -3,7 +3,9 @@ package io.github.trevarj.motd.ui.components
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.irc.format.IRC_BOLD
+import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcTextStyle
+import io.github.trevarj.motd.irc.format.applyIrcColors
 import io.github.trevarj.motd.irc.format.clearIrcFormatting
 import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
@@ -45,6 +47,17 @@ class ComposerFormattingTest {
         val edit = toggleIrcStyle(raw, raw.length, raw.length, IrcTextStyle.BOLD)
         assertTrue(ircStateAtRawOffset(edit.text, edit.selectionStart).bold)
         assertEquals(raw, plainIrcText(edit.text))
+    }
+
+    @Test
+    fun `applying color preserves collapsed visible cursor`() {
+        val raw = "first\n"
+        val before = parseIrcFormatting(raw).visibleOffset(raw.length)
+        val edit = applyIrcColors(raw, raw.length, raw.length, foreground = 4, background = null)
+        val after = parseIrcFormatting(edit.text)
+
+        assertEquals(before, after.visibleOffset(edit.selectionStart))
+        assertEquals(IrcColor.Numeric(4), ircStateAtRawOffset(edit.text, edit.selectionStart).foreground)
     }
 
     @Test

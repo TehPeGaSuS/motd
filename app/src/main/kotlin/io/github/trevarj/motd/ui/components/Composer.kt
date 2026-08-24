@@ -392,6 +392,7 @@ fun Composer(
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
     var expanded by remember { mutableStateOf(false) }
     var colorSheetVisible by remember { mutableStateOf(false) }
+    var restoreFocusAfterColor by remember { mutableStateOf(false) }
     var colorSelection by remember { mutableStateOf(TextRange.Zero) }
     var selectedForeground by remember { mutableStateOf<Int?>(null) }
     var selectedBackground by remember { mutableStateOf<Int?>(null) }
@@ -451,6 +452,12 @@ fun Composer(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(colorSheetVisible, restoreFocusAfterColor) {
+        if (!colorSheetVisible && restoreFocusAfterColor) {
+            focusRequester.requestFocus()
+            restoreFocusAfterColor = false
+        }
+    }
     val density = LocalDensity.current
     val readImeContentHeightPx = rememberImeContentHeightReader(imeHeightPx)
     val imeInsetTracker = remember { ImeInsetTracker() }
@@ -866,13 +873,15 @@ fun Composer(
             onForeground = { selectedForeground = it },
             onBackground = { selectedBackground = it },
             onCancel = {
-                colorSheetVisible = false
                 onValueChange(value.copy(selection = colorSelection))
+                restoreFocusAfterColor = true
+                colorSheetVisible = false
             },
             onRemove = {
                 applyFormatting(
                     applyIrcColors(value.text, colorSelection.start, colorSelection.end, null, null),
                 )
+                restoreFocusAfterColor = true
                 colorSheetVisible = false
             },
             onApply = {
@@ -885,6 +894,7 @@ fun Composer(
                         selectedBackground,
                     ),
                 )
+                restoreFocusAfterColor = true
                 colorSheetVisible = false
             },
         )

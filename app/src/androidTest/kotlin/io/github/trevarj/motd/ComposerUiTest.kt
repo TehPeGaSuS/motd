@@ -278,6 +278,13 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
         compose.onNodeWithTag("chat_format_color").performClick()
         compose.onNodeWithTag("chat_composer_color_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("chat_color_4").performClick()
+        compose.onNodeWithText("Apply").performClick()
+        compose.runOnIdle {
+            val formatted = parseIrcFormatting(draft.value.text)
+            assertEquals(6, formatted.visibleOffset(draft.value.selection.start))
+            assertEquals(IrcColor.Numeric(4), ircStateAtRawOffset(draft.value.text, draft.value.selection.start).foreground)
+        }
     }
 
     @Test
