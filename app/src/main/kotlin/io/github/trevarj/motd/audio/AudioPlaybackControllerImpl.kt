@@ -20,7 +20,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -64,6 +63,13 @@ class AudioPlaybackControllerImpl
         private var playJob: Job? = null
         private var activeRequest: AudioPlaybackRequest? = null
         private var generation = 0L
+        private val positionPoller =
+            AudioPositionPoller(applicationScope, POSITION_POLL_MS) {
+                withContext(Dispatchers.Main.immediate) {
+                    if (_state.value.activeId != null) controller?.let(::updateState)
+                }
+                updateDownloadProgress()
+            }
 
         init {
             val token = SessionToken(context, ComponentName(context, AudioPlaybackService::class.java))
@@ -89,6 +95,7 @@ class AudioPlaybackControllerImpl
                                                         playing = false,
                                                         error = error.message ?: "Playback failed",
                                                     )
+                                                syncPositionPolling()
                                             }
                                         },
                                     )
@@ -102,19 +109,11 @@ class AudioPlaybackControllerImpl
                                     loading = false,
                                     error = error.message ?: "Audio service unavailable",
                                 )
+                            syncPositionPolling()
                         }
                 },
                 ContextCompat.getMainExecutor(context),
             )
-            applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
-                while (true) {
-                    withContext(Dispatchers.Main.immediate) {
-                        if (_state.value.activeId != null) controller?.let(::updateState)
-                    }
-                    updateDownloadProgress()
-                    delay(POSITION_POLL_MS)
-                }
-            }
         }
 
         override fun play(
@@ -138,6 +137,7 @@ class AudioPlaybackControllerImpl
                     origin = request.origin,
                     waveform = attachment.waveform ?: waveformRepository.waveforms.value[attachment.playbackId],
                 )
+            syncPositionPolling()
             playJob =
                 applicationScope.launch {
                     if (attachment.waveform == null) {
@@ -165,6 +165,7 @@ class AudioPlaybackControllerImpl
                                         playing = false,
                                         error = error.message ?: "Playback failed",
                                     )
+                                syncPositionPolling()
                             }
                             return@launch
                         }
@@ -237,6 +238,7 @@ class AudioPlaybackControllerImpl
             if (state.value.activeId != itemId) return
             val requestToAnalyze = activeRequest
             generation++
+            positionPoller.stop()
             playJob?.cancel()
             playJob = null
             activeRequest = null
@@ -256,6 +258,7 @@ class AudioPlaybackControllerImpl
             val current = state.value
             if (!current.loading || current.activeId == null) return
             generation++
+            positionPoller.stop()
             playJob?.cancel()
             playJob = null
             applicationScope.launch(Dispatchers.Main.immediate) {
@@ -464,6 +467,16 @@ class AudioPlaybackControllerImpl
                     speed = mediaController.playbackParameters.speed,
                     error = null,
                 )
+            syncPositionPolling()
+        }
+
+        private fun syncPositionPolling() {
+            val current = _state.value
+            if (current.activeId != null && (current.loading || current.playing)) {
+                positionPoller.start()
+            } else {
+                positionPoller.stop()
+            }
         }
 
         private suspend fun updateDownloadProgress() {
@@ -543,6 +556,31 @@ class AudioPlaybackControllerImpl
             const val EXTRA_SERVER_TIME = "motd.audio.server_time"
         }
     }
+
+internal class AudioPositionPoller(
+    private val scope: CoroutineScope,
+    private val intervalMs: Long,
+    private val tick: suspend () -> Unit,
+) {
+    private var job: Job? = null
+    val isRunning: Boolean get() = job?.isActive == true
+
+    fun start() {
+        if (isRunning) return
+        job =
+            scope.launch {
+                while (true) {
+                    tick()
+                    delay(intervalMs)
+                }
+            }
+    }
+
+    fun stop() {
+        job?.cancel()
+        job = null
+    }
+}
 
 fun AudioPlaybackOrigin.contextLabel(
     networkName: String? = null,
