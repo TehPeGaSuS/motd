@@ -77,28 +77,47 @@ class FileDiagnosticLogger
         private val currentFile = File(directory, CURRENT_FILE)
         private val previousFile = File(directory, PREVIOUS_FILE)
         private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
-        private val commands = Channel<Command>(Channel.UNLIMITED)
+        private val wake = Channel<Unit>(Channel.CONFLATED)
+        private val pendingLock = Any()
+        private val pending = ArrayDeque<Command>()
+        private var pendingAppends = 0
+        private val droppedAppends = AtomicLong(0)
         private val sequence = AtomicLong(0)
         private val _enabled = MutableStateFlow(preferences.getBoolean(ENABLED, false))
         internal var maxFileBytes: Long = MAX_FILE_BYTES
+        internal var maxPendingAppends: Int = MAX_PENDING_APPENDS
+        internal val pendingAppendCount: Int get() = synchronized(pendingLock) { pendingAppends }
 
         override val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
         init {
             scope.launch {
-                for (command in commands) {
-                    when (command) {
-                        is Command.Append -> {
+                for (ignored in wake) {
+                    while (true) {
+                        val command = pollCommand()
+                        if (command is Command.Append) {
                             append(command.line)
+                            continue
                         }
+                        when (command) {
+                            null -> {
+                                val dropped = flushDroppedAppends()
+                                if (dropped == 0L) break
+                            }
 
-                        Command.Clear -> {
-                            clearFiles()
-                        }
+                            Command.Clear -> {
+                                clearFiles()
+                            }
 
-                        is Command.Export -> {
-                            runCatching { exportFiles(command.output) }
-                                .fold(command.done::complete) { command.done.completeExceptionally(it) }
+                            is Command.Export -> {
+                                flushDroppedAppends()
+                                runCatching { exportFiles(command.output) }
+                                    .fold(command.done::complete) { command.done.completeExceptionally(it) }
+                            }
+
+                            is Command.Append -> {
+                                error("handled above")
+                            }
                         }
                     }
                 }
@@ -110,7 +129,7 @@ class FileDiagnosticLogger
             if (enabled) {
                 // A newly enabled trace starts from a clean boundary so an exported report cannot
                 // accidentally contain an older diagnostic session.
-                commands.trySend(Command.Clear)
+                enqueueControl(Command.Clear)
                 preferences.edit { putBoolean(ENABLED, true) }
                 _enabled.value = true
                 record("diagnostics", "enabled")
@@ -135,16 +154,55 @@ class FileDiagnosticLogger
                     event = event,
                     fields = fields(),
                 )
-            commands.trySend(Command.Append(line))
+            enqueueAppend(line)
         }
 
         override fun fingerprint(value: String?): String? = diagnosticFingerprint(value)
 
         override suspend fun exportTo(output: OutputStream) {
             val done = CompletableDeferred<Unit>()
-            commands.send(Command.Export(output, done))
+            enqueueControl(Command.Export(output, done))
             done.await()
         }
+
+        private fun enqueueAppend(line: String) {
+            val accepted =
+                synchronized(pendingLock) {
+                    if (pendingAppends >= maxPendingAppends) {
+                        false
+                    } else {
+                        pending.addLast(Command.Append(line))
+                        pendingAppends++
+                        true
+                    }
+                }
+            if (!accepted) droppedAppends.incrementAndGet()
+            wake.trySend(Unit)
+        }
+
+        private fun enqueueControl(command: Command) {
+            synchronized(pendingLock) { pending.addLast(command) }
+            wake.trySend(Unit)
+        }
+
+        private fun pollCommand(): Command? =
+            synchronized(pendingLock) {
+                pending.removeFirstOrNull()?.also { if (it is Command.Append) pendingAppends-- }
+            }
+
+        private fun flushDroppedAppends(): Long =
+            droppedAppends.getAndSet(0).also { count ->
+                if (count > 0) append(droppedLine(count))
+            }
+
+        private fun droppedLine(count: Long): String =
+            formatDiagnosticLine(
+                timestamp = Instant.now().toString(),
+                sequence = sequence.incrementAndGet(),
+                component = "diagnostics",
+                event = "events_dropped",
+                fields = mapOf("count" to count),
+            )
 
         private fun append(line: String) {
             directory.mkdirs()
@@ -193,6 +251,7 @@ class FileDiagnosticLogger
             const val CURRENT_FILE = "motd-diagnostics.log"
             const val PREVIOUS_FILE = "motd-diagnostics.log.1"
             const val MAX_FILE_BYTES = 512L * 1024L
+            const val MAX_PENDING_APPENDS = 512
         }
     }
 

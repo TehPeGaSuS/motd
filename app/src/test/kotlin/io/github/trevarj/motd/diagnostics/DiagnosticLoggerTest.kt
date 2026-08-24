@@ -100,6 +100,24 @@ class DiagnosticLoggerTest {
         }
 
     @Test
+    fun appendBurstIsBoundedAndExportReportsDrops() =
+        runTest {
+            val logger =
+                FileDiagnosticLogger(context, StandardTestDispatcher(testScheduler)).apply {
+                    maxPendingAppends = 32
+                }
+            logger.setEnabled(true)
+            repeat(100_000) { logger.record("burst", "item") }
+
+            assertEquals(32, logger.pendingAppendCount)
+            val output = ByteArrayOutputStream()
+            logger.exportTo(output)
+
+            assertEquals(0, logger.pendingAppendCount)
+            assertTrue(output.toString().contains("component=diagnostics event=events_dropped count="))
+        }
+
+    @Test
     fun formatterOmitsSensitiveFieldsAndNormalizesLines() {
         val line =
             formatDiagnosticLine(
