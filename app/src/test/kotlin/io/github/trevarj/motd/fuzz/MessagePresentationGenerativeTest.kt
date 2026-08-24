@@ -2,6 +2,7 @@ package io.github.trevarj.motd.fuzz
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.LinkAnnotation
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.isImageUrl
@@ -27,10 +28,11 @@ class MessagePresentationGenerativeTest {
             val text = fuzz.random.presentationText()
             fuzz.record("text=${text.traceSummary()}")
 
-            val segments = parseInlineCode(text)
+            val visibleText = parseIrcFormatting(text).visibleText
+            val segments = parseInlineCode(visibleText)
             val expectedBody = segments.joinToString("") { it.text }
-            val urls = extractUrls(text)
-            val classified = messageUrls(text)
+            val urls = extractUrls(visibleText)
+            val classified = messageUrls(visibleText)
             val body =
                 linkifiedBody(
                     text = text,
@@ -41,9 +43,9 @@ class MessagePresentationGenerativeTest {
                 )
 
             assertEquals(expectedBody, body.text)
-            assertEquals(segments, parseInlineCode(text))
-            assertEquals(urls, extractUrls(text))
-            assertEquals(classified, messageUrls(text))
+            assertEquals(segments, parseInlineCode(visibleText))
+            assertEquals(urls, extractUrls(visibleText))
+            assertEquals(classified, messageUrls(visibleText))
             assertTrue(segments.isNotEmpty())
             assertTrue(segments.zipWithNext().none { (a, b) -> a is InlineTextSegment.Plain && b is InlineTextSegment.Plain })
             assertTrue(segments.filterIsInstance<InlineTextSegment.Code>().none { it.text.isEmpty() })
@@ -51,7 +53,7 @@ class MessagePresentationGenerativeTest {
             var previous = -1
             urls.forEach { url ->
                 assertTrue(url.startsWith("http://") || url.startsWith("https://"))
-                val next = text.indexOf(url, previous.coerceAtLeast(0))
+                val next = visibleText.indexOf(url, previous.coerceAtLeast(0))
                 assertTrue("URL order changed for $url", next >= previous)
                 previous = next
             }
