@@ -1038,7 +1038,15 @@ private fun ComposerColorSheet(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("IRC color", style = MaterialTheme.typography.titleLarge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("IRC color", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Button(onClick = onApply, modifier = Modifier.testTag("chat_composer_color_apply")) {
+                    Text("Apply")
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = { editingBackground = false }) {
                     Text(if (editingBackground) "Text" else "Text ✓")
@@ -1085,7 +1093,6 @@ private fun ComposerColorSheet(
             ) {
                 TextButton(onClick = onRemove) { Text("Remove colors") }
                 TextButton(onClick = onCancel) { Text("Cancel") }
-                Button(onClick = onApply) { Text("Apply") }
             }
         }
     }

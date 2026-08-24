@@ -279,7 +279,7 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_format_color").performClick()
         compose.onNodeWithTag("chat_composer_color_sheet").assertIsDisplayed()
         compose.onNodeWithTag("chat_color_4").performClick()
-        compose.onNodeWithText("Apply").performClick()
+        compose.onNodeWithTag("chat_composer_color_apply").assertIsDisplayed().performClick()
         compose.runOnIdle {
             val formatted = parseIrcFormatting(draft.value.text)
             assertEquals(6, formatted.visibleOffset(draft.value.selection.start))
@@ -372,7 +372,7 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_color_4").performClick()
         compose.onNodeWithText("Background").performClick()
         compose.onNodeWithTag("chat_color_1").performClick()
-        compose.onNodeWithText("Apply").performClick()
+        compose.onNodeWithTag("chat_composer_color_apply").assertIsDisplayed().performClick()
         compose.runOnIdle {
             val state = parseIrcFormatting(draft.value.text).runs.single().state
             assertEquals(IrcColor.Numeric(4), state.foreground)
