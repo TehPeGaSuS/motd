@@ -46,6 +46,7 @@ import kotlinx.coroutines.yield
 import java.lang.ref.WeakReference
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -1750,25 +1751,39 @@ class HistoryResyncCoordinator
                     // mass-expire the tail of a large pass. The width adapts to what the server keeps up
                     // with, and admission is FIFO, so the ordering [mergeSyncTargets] chose survives.
                     val fanOut = AdaptiveFanOut()
+                    val nextIndex = AtomicInteger()
+                    val ordered = arrayOfNulls<TargetOutcome>(targets.size)
                     coroutineScope {
-                        targets
-                            .map { targetSpec ->
-                                async {
-                                    fanOut.withSlot {
-                                        syncOneTarget(
-                                            networkId = networkId,
-                                            targetSpec = targetSpec,
-                                            source = source,
-                                            isCurrent = isCurrent,
-                                            hasDiscoveryWatermark = hasDiscoveryWatermark,
-                                            session = session,
-                                            paceBeforeFetchMs = 0,
-                                            allowConcurrent = true,
-                                            fanOut = fanOut,
-                                        )
-                                    }
+                        List(minOf(targets.size, HistoryPageLoader.MAX_CONCURRENT_WIRE_REQUESTS)) {
+                            async {
+                                while (true) {
+                                    val claimed =
+                                        fanOut.withSlot {
+                                            val index = nextIndex.getAndIncrement()
+                                            if (index >= targets.size) {
+                                                null
+                                            } else {
+                                                index to
+                                                    syncOneTarget(
+                                                        networkId = networkId,
+                                                        targetSpec = targets[index],
+                                                        source = source,
+                                                        isCurrent = isCurrent,
+                                                        hasDiscoveryWatermark = hasDiscoveryWatermark,
+                                                        session = session,
+                                                        paceBeforeFetchMs = 0,
+                                                        allowConcurrent = true,
+                                                        fanOut = fanOut,
+                                                    )
+                                            }
+                                        } ?: break
+                                    ordered[claimed.first] = claimed.second
                                 }
-                            }.awaitAll()
+                            }
+                        }.awaitAll()
+                    }
+                    ordered.mapIndexed { index, outcome ->
+                        checkNotNull(outcome) { "history target $index did not settle" }
                     }
                 } else {
                     // Strictly sequential: connections without labeled-response, and the paced backfill
