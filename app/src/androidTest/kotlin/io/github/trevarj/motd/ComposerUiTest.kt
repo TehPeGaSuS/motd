@@ -338,7 +338,9 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
         compose.onNodeWithTag("chat_format_bold").performClick()
         compose.runOnIdle {
-            assertEquals("${IRC_BOLD}hello\nthere$IRC_BOLD", draft.value.text)
+            val formatted = parseIrcFormatting(draft.value.text)
+            assertEquals("hello\nthere", formatted.visibleText)
+            assertTrue(formatted.runs.all { it.state.bold })
         }
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
         compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
