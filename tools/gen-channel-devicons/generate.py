@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate channel-devicons.json from a pinned devicons/devicon checkout.
+"""Generate channel-devicons metadata and lazy path resources from a pinned devicon checkout.
 
 The channel-badge renderer matches IRC channel tokens against icon names, so the
 catalog is generated straight from devicon's own metadata (name + altnames)
@@ -7,9 +7,8 @@ instead of hand-curating alias sets per icon. Marks devicon cannot supply
 (Guix custom art, icons whose plain SVG fails validation below) stay in the
 hand-written ChannelDevicon enum in ChannelDeviconBadge.kt.
 
-The catalog ships as a packaged java resource rather than compiled Kotlin
-constants: 308 marks of path data is data, not code, and as Kotlin it had to be
-split across marks0()..marks12() to stay under the 64KB method limit.
+The compact metadata index is parsed on first channel lookup. Each mark's path data
+lives in its own resource and is decoded only when that mark is rendered.
 
 Regenerate:
   curl -sL https://github.com/devicons/devicon/archive/refs/tags/v2.16.0.tar.gz | tar xz -C /tmp
@@ -97,7 +96,7 @@ def main() -> int:
         if len(sys.argv) > 2
         else os.path.join(
             os.path.dirname(__file__),
-            "../../app/src/main/resources/channel-devicons.json",
+            "../../app/src/main/resources/channel-devicons-index.json",
         )
     )
     icons = json.load(open(os.path.join(root, "devicon.json")))
@@ -122,21 +121,29 @@ def main() -> int:
         marks.append((name, aliases, width, height, paths))
 
     payload = [
-        {
-            "name": name,
-            "aliases": aliases,
-            "w": width,
-            "h": height,
-            "paths": [{"evenOdd": even_odd, "d": d} for even_odd, d in paths],
-        }
-        for name, aliases, width, height, paths in marks
+        {"name": name, "aliases": aliases, "w": width, "h": height}
+        for name, aliases, width, height, _ in marks
     ]
+    paths_dir = os.path.join(os.path.dirname(out_path), "channel-devicons")
+    os.makedirs(paths_dir, exist_ok=True)
+    for filename in os.listdir(paths_dir):
+        if filename.endswith(".json"):
+            os.unlink(os.path.join(paths_dir, filename))
+    for name, _, _, _, paths in marks:
+        with open(os.path.join(paths_dir, f"{name}.json"), "w") as out:
+            json.dump(
+                [{"evenOdd": even_odd, "d": d} for even_odd, d in paths],
+                out,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            out.write("\n")
 
     with open(out_path, "w") as out:
         json.dump(payload, out, separators=(",", ":"), ensure_ascii=False)
         out.write("\n")
     total = sum(len(d) for *_, paths in marks for _, d in paths)
-    print(f"wrote {len(marks)} marks ({total} path bytes) to {out_path}")
+    print(f"wrote {len(marks)} marks ({total} path bytes) to {out_path} and {paths_dir}")
     print(f"skipped for size (> {MAX_PATH_BYTES}): {', '.join(skipped_size)}")
     print(f"skipped for shape/validation: {', '.join(skipped_shape)}")
     return 0

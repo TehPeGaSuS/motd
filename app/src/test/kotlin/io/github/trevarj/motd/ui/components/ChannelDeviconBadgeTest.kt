@@ -27,10 +27,30 @@ class ChannelDeviconBadgeTest {
     }
 
     @Test fun the_packaged_catalog_resource_loads_every_mark() {
-        // Guards the java-resource read: a missing or truncated channel-devicons.json would
-        // otherwise degrade silently to "no channel ever matches an icon".
+        // Guards the compact index read: a missing/truncated resource must fail, never degrade.
         assertEquals(308, ChannelDeviconCatalog.marks.size)
         assertEquals(308 + ChannelDevicon.entries.size, allChannelMarks.size)
+        val index = checkNotNull(javaClass.getResourceAsStream("/channel-devicons-index.json"))
+        assertTrue(index.use { it.readBytes().size } <= 64 * 1024)
+    }
+
+    @Test fun catalog_path_payload_stays_lazy_until_vector_access() {
+        var loads = 0
+        val mark =
+            CatalogChannelMark("lazy", setOf("lazy"), 10f, 10f) {
+                loads++
+                listOf(false to "M0 0h10v10z")
+            }
+
+        assertEquals("lazy", mark.markName)
+        assertEquals(0, loads)
+        assertTrue(mark.hasParseablePathData())
+        assertEquals(1, loads)
+    }
+
+    @Test fun channel_match_cache_is_bounded() {
+        repeat(600) { matchedChannelDevicon("#unmatched-$it") }
+        assertTrue(channelDeviconMatchCacheSize() <= 512)
     }
 
     @Test fun every_bundled_channel_mark_has_parseable_vector_source() {

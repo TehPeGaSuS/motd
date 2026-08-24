@@ -55,10 +55,11 @@ internal class CatalogChannelMark(
     override val aliases: Set<String>,
     override val viewportWidth: Float,
     override val viewportHeight: Float,
-    private val pathData: List<Pair<Boolean, String>>,
+    pathDataLoader: () -> List<Pair<Boolean, String>>,
 ) : ChannelMark {
     override val translateX = 0f
     override val translateY = 0f
+    private val pathData by lazy(LazyThreadSafetyMode.NONE, pathDataLoader)
 
     override val paths: List<Path> by lazy(LazyThreadSafetyMode.NONE) {
         pathData.map { (evenOdd, data) ->
@@ -179,20 +180,34 @@ internal val allChannelMarks: List<ChannelMark> by lazy(LazyThreadSafetyMode.NON
     ChannelDevicon.entries + ChannelDeviconCatalog.marks
 }
 
-private data class ChannelMarkMatch(
-    val index: Int,
-    val mark: ChannelMark,
-    val alias: String,
-)
+private val channelMarkMatchCache =
+    object : LinkedHashMap<String, ChannelMark?>(512, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ChannelMark?>?): Boolean = size > 512
+    }
 
-internal fun matchedChannelDevicon(channelName: String): ChannelMark? {
-    val tokens = channelTokens(channelName)
-    return allChannelMarks
-        .flatMapIndexed { index, mark -> mark.aliases.map { alias -> ChannelMarkMatch(index, mark, alias) } }
-        .filter { match -> tokens.any { token -> tokenMatchesAlias(token, match.alias) } }
-        .maxWithOrNull(compareBy<ChannelMarkMatch> { it.alias.length }.thenBy { it.index })
-        ?.mark
-}
+internal fun matchedChannelDevicon(channelName: String): ChannelMark? =
+    synchronized(channelMarkMatchCache) {
+        if (channelMarkMatchCache.containsKey(channelName)) return@synchronized channelMarkMatchCache[channelName]
+        val tokens = channelTokens(channelName)
+        var best: ChannelMark? = null
+        var bestAliasLength = -1
+        var bestIndex = -1
+        allChannelMarks.forEachIndexed { index, mark ->
+            mark.aliases.forEach { alias ->
+                if (tokens.any { token -> tokenMatchesAlias(token, alias) } &&
+                    (alias.length > bestAliasLength || alias.length == bestAliasLength && index > bestIndex)
+                ) {
+                    best = mark
+                    bestAliasLength = alias.length
+                    bestIndex = index
+                }
+            }
+        }
+        channelMarkMatchCache[channelName] = best
+        best
+    }
+
+internal fun channelDeviconMatchCacheSize(): Int = synchronized(channelMarkMatchCache) { channelMarkMatchCache.size }
 
 /**
  * Channel names retain compact technical identifiers such as `k8s` in addition to the ordinary
