@@ -73,6 +73,12 @@ class ComposerFormattingTest {
         val cleared = clearIrcFormatting(selected.text, range.first, range.last + 1)
         assertEquals(raw, plainIrcText(cleared.text))
         assertTrue(parseIrcFormatting(cleared.text).runs.all { it.state.isDefault })
+
+        val colored = applyIrcColors(raw, 0, raw.length, foreground = 4, background = 1)
+        val coloredRange = messageFormattingRange(colored.text)!!
+        val colorCleared = clearIrcFormatting(colored.text, coloredRange.first, coloredRange.last + 1)
+        assertEquals(raw, plainIrcText(colorCleared.text))
+        assertTrue(parseIrcFormatting(colorCleared.text).runs.all { it.state.isDefault })
     }
 
     @Test
