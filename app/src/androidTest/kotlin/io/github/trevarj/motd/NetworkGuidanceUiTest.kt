@@ -99,7 +99,7 @@ class NetworkGuidanceUiTest {
         }
 
         compose.onNodeWithText("OFTC does not support SASL", substring = true).assertExists()
-        compose.onNodeWithText("NickServ password", substring = true).assertExists()
+        compose.onNodeWithText("NickServ password (optional)").assertExists()
 
         compose.runOnIdle { presetId = NetworkPresetId.EFNET }
         compose.onNodeWithText("no network account or nickname registration", substring = true).assertExists()
