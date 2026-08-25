@@ -82,8 +82,15 @@ port only as an optional fallback):
 ```
 
 The route rules above restrict the service to the bouncer named `soju`; change
-that name only to match your Docker/network layout. Validate and start Xray
-using your distribution's service or Docker setup:
+that name only to match your Docker/network layout. If soju advertises a file
+host outside that name, allow only its exact host and port before the blocking
+rule too:
+
+```json
+{ "type": "field", "domain": ["full:<FILEHOST_HOST>"], "port": "<FILEHOST_PORT>", "outboundTag": "direct" }
+```
+
+Validate and start Xray using your distribution's service or Docker setup:
 
 ```sh
 xray run -test -c /etc/xray/config.json
@@ -116,7 +123,10 @@ UUID per device and remove it from the server config when a device is lost.
    certificate for later connections.
 
 If your bouncer is elsewhere, keep its normal hostname and port instead, and
-adjust the Xray route restriction accordingly.
+adjust the Xray route restriction accordingly. For VLESS + REALITY networks,
+motd also accepts a Soju file host at the exact user-configured VLESS ingress
+hostname, while still refusing unrelated hosts before sending the network
+credential. HTTPS certificate validation remains required.
 
 ## SOCKS5 and Tor
 

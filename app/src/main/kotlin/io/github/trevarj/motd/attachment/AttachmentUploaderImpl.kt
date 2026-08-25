@@ -5,7 +5,9 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.audio.NetworkMediaRoute
+import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -209,12 +211,15 @@ class AttachmentUploaderImpl
                     ?: throw UploadException("No route for this network.")
             if (route.proxyError != null) throw UploadException(route.proxyError)
             return route.use {
-                // Bind the advertised endpoint to the host this network's credential belongs to BEFORE
-                // opening anything: both requests below authenticate, and the OPTIONS probe is the one
-                // that would leak the Authorization header first.
+                // Bind the endpoint to the IRC host or user-configured VLESS ingress BEFORE opening
+                // anything: both requests authenticate, and OPTIONS would leak the header first.
+                val tunnelHost =
+                    route.endpoint
+                        .takeIf { it.obfsMode == ObfsMode.EMBEDDED_REALITY }
+                        ?.let { VlessLink.parse(it.obfsLink.orEmpty()).getOrNull()?.host }
                 val endpoint =
                     when (
-                        val advertised = sojuFileHostEndpoint(ready.isupport, route.endpoint.host)
+                        val advertised = sojuFileHostEndpoint(ready.isupport, route.endpoint.host, tunnelHost)
                     ) {
                         is SojuFileHostEndpoint.Usable -> {
                             advertised.url

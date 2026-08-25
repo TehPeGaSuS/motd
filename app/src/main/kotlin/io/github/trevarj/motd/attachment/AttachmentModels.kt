@@ -168,17 +168,17 @@ internal fun httpsUploadUri(value: String?): java.net.URI? =
     }.getOrNull()
 
 /**
- * How the `soju.im/FILEHOST` endpoint a network advertises resolved against the host that network
- * is actually connected to.
+ * How the `soju.im/FILEHOST` endpoint a network advertises resolved against its configured
+ * credential authorities.
  */
 sealed interface SojuFileHostEndpoint {
-    /** Advertised, well formed, and served within the network host's DNS namespace. */
+    /** Advertised, well formed, and bound to the network host or exact VLESS ingress. */
     data class Usable(
         val url: String,
     ) : SojuFileHostEndpoint
 
     /**
-     * Advertised and well formed, but served outside [networkHost]'s DNS namespace.
+     * Advertised and well formed, but served outside every configured credential authority.
      *
      * An upload authenticates with the network's SASL credential, so following this endpoint would
      * forward that credential to a third-party host the server merely named — with no pin and no
@@ -205,27 +205,34 @@ fun sojuFileHostAdvertised(isupport: Map<String, String>): Boolean = httpsUpload
 fun sojuFileHostEndpoint(
     isupport: Map<String, String>,
     networkHost: String,
-): SojuFileHostEndpoint = validateSojuFileHostEndpoint(isupport[SOJU_FILEHOST_TOKEN], networkHost)
+    trustedTunnelHost: String? = null,
+): SojuFileHostEndpoint = validateSojuFileHostEndpoint(isupport[SOJU_FILEHOST_TOKEN], networkHost, trustedTunnelHost)
 
 /**
  * Resolve an advertised file-host endpoint against [networkHost], the host of the IRC endpoint the
- * upload's credential belongs to.
+ * upload's credential belongs to, or [trustedTunnelHost], its user-configured VLESS ingress.
  *
- * The host must match or be its subdomain, case-insensitively. This permits a network owner to
- * isolate uploads at e.g. `files.irc.example` without trusting sibling or unrelated domains.
+ * The host must match or be a subdomain of [networkHost], or exactly match [trustedTunnelHost],
+ * case-insensitively. This permits a network owner to isolate uploads at e.g.
+ * `files.irc.example` without treating every host below a third-party VLESS provider as trusted.
  * **Ports must not** match: soju commonly serves IRC and uploads on separate ports.
  */
 fun validateSojuFileHostEndpoint(
     value: String?,
     networkHost: String,
+    trustedTunnelHost: String? = null,
 ): SojuFileHostEndpoint {
     val uri = httpsUploadUri(value) ?: return SojuFileHostEndpoint.Unavailable
     val advertised = uri.host.trimEnd('.')
     val expected = networkHost.trim().trimEnd('.')
-    // Fails closed on an unknown network host: an endpoint we cannot bind is never usable.
+    val tunnel = trustedTunnelHost?.trim()?.trimEnd('.').orEmpty()
+    // Fails closed when no configured authority owns the advertised DNS namespace.
     return if (
-        expected.isNotEmpty() &&
-        (advertised.equals(expected, ignoreCase = true) || advertised.endsWith(".$expected", ignoreCase = true))
+        (
+            expected.isNotEmpty() &&
+                (advertised.equals(expected, ignoreCase = true) || advertised.endsWith(".$expected", ignoreCase = true))
+        ) ||
+        (tunnel.isNotEmpty() && advertised.equals(tunnel, ignoreCase = true))
     ) {
         SojuFileHostEndpoint.Usable(uri.toString())
     } else {

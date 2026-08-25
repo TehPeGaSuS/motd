@@ -60,10 +60,20 @@ class AttachmentModelsTest {
             SojuFileHostEndpoint.Usable("https://files.irc.starlightnet.work/uploads"),
             validateSojuFileHostEndpoint("https://files.irc.starlightnet.work/uploads", "starlightnet.work"),
         )
+        // VLESS may route to an internal Docker name while its user-configured public ingress owns
+        // the advertised HTTPS file host.
+        assertEquals(
+            SojuFileHostEndpoint.Usable("https://edge.example/uploads"),
+            validateSojuFileHostEndpoint("https://edge.example/uploads", "soju", "edge.example"),
+        )
+        assertEquals(
+            SojuFileHostEndpoint.OffHost("files.edge.example", "soju"),
+            validateSojuFileHostEndpoint("https://files.edge.example/uploads", "soju", "edge.example"),
+        )
         // A server naming a third-party host is refused, and the advertised host is reported.
         assertEquals(
             SojuFileHostEndpoint.OffHost("evil.example", "irc.example"),
-            validateSojuFileHostEndpoint("https://evil.example/uploads", "irc.example"),
+            validateSojuFileHostEndpoint("https://evil.example/uploads", "irc.example", "edge.example"),
         )
         // A sibling domain is outside the connected host's namespace.
         assertEquals(

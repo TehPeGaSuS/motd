@@ -6,6 +6,7 @@ import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.audio.NetworkMediaRoute
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -33,6 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * `soju.im/FILEHOST` endpoint is bound to the host that credential belongs to before any request
  * is opened. Without that binding a server can name any third-party host and have the client
  * forward its Authorization header there — credential forwarding, with no pin and no consent.
+ * A VLESS ingress explicitly configured for that network is also an authority, but no other host is.
  *
  * The probe socket below stands in for the advertised host so a leaked request is observable:
  * every connection attempt is counted, then dropped.
@@ -71,6 +73,17 @@ class SojuFileHostBindingTest {
         assertTrue("the upload never reached the advertised host", probe.connections() > 0)
     }
 
+    @Test fun vlessIngressHostMayServeTheFileHost() {
+        assertThrows(IOException::class.java) {
+            uploadText(
+                advertised = "https://127.0.0.1:${probe.port}/uploads",
+                networkHost = "soju",
+                vlessHost = "127.0.0.1",
+            )
+        }
+        assertTrue("the upload never reached the configured VLESS host", probe.connections() > 0)
+    }
+
     @Test fun networkWithoutAFileHostIsRefusedWithoutNamingAHost() {
         val error =
             assertThrows(UploadException::class.java) {
@@ -83,13 +96,14 @@ class SojuFileHostBindingTest {
     private fun uploadText(
         advertised: String?,
         networkHost: String,
+        vlessHost: String? = null,
     ) = runBlocking {
         val isupport = advertised?.let { mapOf(SOJU_FILEHOST_TOKEN to it) }.orEmpty()
         val uploader =
             AttachmentUploaderImpl(
                 ApplicationProvider.getApplicationContext<Context>(),
                 FakeConnectionManager(IrcClientState.Ready("me", emptySet(), isupport)),
-                MediaRouteResolver { id -> route(id, networkHost) },
+                MediaRouteResolver { id -> route(id, networkHost, vlessHost) },
             )
         uploader
             .upload(
@@ -102,6 +116,7 @@ class SojuFileHostBindingTest {
     private fun route(
         networkId: Long,
         host: String,
+        vlessHost: String?,
     ) = NetworkMediaRoute(
         networkId = networkId,
         endpoint =
@@ -117,6 +132,12 @@ class SojuFileHostBindingTest {
                 saslMechanism = "PLAIN",
                 saslUser = "me",
                 saslPassword = "hunter2",
+                obfsMode = vlessHost?.let { ObfsMode.EMBEDDED_REALITY },
+                obfsLink =
+                    vlessHost?.let {
+                        "vless://123e4567-e89b-12d3-a456-426614174000@$it:443?" +
+                            "type=tcp&security=reality&sni=example.com&pbk=key&sid=id"
+                    },
             ),
         proxy = null,
         proxyError = null,
