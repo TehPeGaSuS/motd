@@ -63,6 +63,26 @@ class NetworkFormTest {
     }
 
     @Test
+    fun `password-only NickServ syntax round trips by enum name`() {
+        val auth =
+            AuthForm(
+                mode = AuthMode.NONE,
+                nickServPassword = "nick-secret",
+                nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_ONLY,
+            )
+
+        val entity =
+            buildNetworkEntity(
+                server = ServerForm(host = "irc.irchighway.net", nick = "me"),
+                auth = auth,
+                role = NetworkRole.DIRECT,
+            )
+
+        assertEquals("PASSWORD_ONLY", entity.nickServIdentifySyntax)
+        assertEquals(auth, entity.toAuthForm())
+    }
+
+    @Test
     fun `NickServ validation rejects unsafe passwords and recovery commands`() {
         assertTrue(AuthForm(nickServPassword = "secret").isValid)
         assertTrue(AuthForm(nickServRecoveryEnabled = true).isValid)

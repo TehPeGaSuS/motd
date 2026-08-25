@@ -4,13 +4,17 @@ import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.ui.settings.addnetwork.COMMON_NETWORK_PRESETS
+import io.github.trevarj.motd.ui.settings.addnetwork.NetworkGuidanceKind
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.SOJU_NETWORK_PRESET_CHOICES
 import io.github.trevarj.motd.ui.settings.addnetwork.applyNetworkPreset
 import io.github.trevarj.motd.ui.settings.addnetwork.applySojuNetworkPreset
+import io.github.trevarj.motd.ui.settings.addnetwork.networkPreset
 import io.github.trevarj.motd.ui.settings.addnetwork.sojuPresetAddress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NetworkPresetsTest {
@@ -61,6 +65,81 @@ class NetworkPresetsTest {
         )
         assertEquals(8, COMMON_NETWORK_PRESETS.count { !it.legacyUnencrypted })
         assertEquals(2, COMMON_NETWORK_PRESETS.count { it.legacyUnencrypted })
+    }
+
+    @Test
+    fun guidance_and_official_links_are_exact_for_every_built_in_preset() {
+        assertEquals(
+            mapOf(
+                NetworkPresetId.LIBERA to
+                    Triple(
+                        NetworkGuidanceKind.NICKSERV_SASL,
+                        "https://libera.chat/guides/registration",
+                        "https://libera.chat/guides/sasl",
+                    ),
+                NetworkPresetId.OFTC to
+                    Triple(
+                        NetworkGuidanceKind.NICKSERV,
+                        "https://www.oftc.net/Services/",
+                        "https://www.oftc.net/FAQ/Services/",
+                    ),
+                NetworkPresetId.EFNET to
+                    Triple(
+                        NetworkGuidanceKind.NO_REGISTRATION,
+                        "https://www.efnet.org/",
+                        null,
+                    ),
+                NetworkPresetId.IRCNET to
+                    Triple(
+                        NetworkGuidanceKind.IRCNET_SASL,
+                        "https://sasl.ircnet.com/account/",
+                        "https://www.ircnet.com/sasl",
+                    ),
+                NetworkPresetId.DALNET to
+                    Triple(
+                        NetworkGuidanceKind.NICKSERV,
+                        "https://docs.dal.net/docs/nsemail.html",
+                        "https://docs.dal.net/docs/nickserv.html",
+                    ),
+                NetworkPresetId.RIZON to
+                    Triple(
+                        NetworkGuidanceKind.NICKSERV_SASL,
+                        "https://wiki.rizon.net/index.php?title=Register_your_nickname",
+                        "https://wiki.rizon.net/index.php?title=SASL",
+                    ),
+                NetworkPresetId.SNOONET to
+                    Triple(
+                        NetworkGuidanceKind.NICKSERV_SASL,
+                        "https://snoonet.org/anope#NickServ",
+                        "https://snoonet.org/help/",
+                    ),
+                NetworkPresetId.IRCHIGHWAY to
+                    Triple(
+                        NetworkGuidanceKind.NICKSERV_PASSWORD_ONLY,
+                        "https://irchighway.net/help/nickserv-help",
+                        null,
+                    ),
+                NetworkPresetId.QUAKENET to
+                    Triple(
+                        NetworkGuidanceKind.QUAKENET_Q,
+                        "https://www.quakenet.org/help/q/how-to-register-an-account-with-q",
+                        "https://www.quakenet.org/help/q-commands/auth",
+                    ),
+                NetworkPresetId.UNDERNET to
+                    Triple(
+                        NetworkGuidanceKind.UNDERNET_CSERVICE,
+                        "https://cservice.undernet.org/live/",
+                        "https://www.undernet.org/loc/",
+                    ),
+            ),
+            COMMON_NETWORK_PRESETS.associate { it.id to Triple(it.guidance, it.registrationUrl, it.loginUrl) },
+        )
+        assertTrue(
+            COMMON_NETWORK_PRESETS.all { preset ->
+                listOfNotNull(preset.registrationUrl, preset.loginUrl).all { it.startsWith("https://") }
+            },
+        )
+        assertNull(networkPreset(NetworkPresetId.CUSTOM))
     }
 
     @Test

@@ -55,7 +55,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 enum class SaslMechanism { NONE, PLAIN, EXTERNAL }
 
-enum class NickServIdentifySyntax { NICK_PASSWORD, PASSWORD_NICK }
+enum class NickServIdentifySyntax { NICK_PASSWORD, PASSWORD_NICK, PASSWORD_ONLY }
 
 /** One automatic preferred-nick recovery across every socket owned by a connection actor. */
 class NickRecoveryGuard {

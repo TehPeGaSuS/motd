@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -87,6 +88,7 @@ import io.github.trevarj.motd.ui.settings.NetworkForm
 import io.github.trevarj.motd.ui.settings.PasswordField
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetPicker
+import io.github.trevarj.motd.ui.settings.addnetwork.networkPreset
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -158,7 +160,7 @@ fun OnboardingContent(
         pagerState.animateScrollToPage(steps.indexOf(state.step))
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.weight(1f),
@@ -510,6 +512,7 @@ private fun ServerPage(
             // only the nick here (its bouncer SASL user/password live on the AUTH step).
             showIdentity = !state.isBouncer,
             showNick = state.isBouncer,
+            preset = networkPreset(state.presetId),
         )
     }
 }

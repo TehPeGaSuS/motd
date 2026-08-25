@@ -212,6 +212,7 @@ fun AddNetworkContent(
                                 onServerChange = onServerChange,
                                 onAuthChange = onAuthChange,
                                 modifier = Modifier.padding(vertical = 16.dp),
+                                preset = networkPreset(state.presetId),
                             )
                         }
                     }

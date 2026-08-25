@@ -471,6 +471,7 @@ internal fun nickServIdentifyLine(config: IrcClientConfig): String {
         when (config.nickServIdentifySyntax) {
             NickServIdentifySyntax.NICK_PASSWORD -> "IDENTIFY ${config.nick} $password"
             NickServIdentifySyntax.PASSWORD_NICK -> "IDENTIFY $password ${config.nick}"
+            NickServIdentifySyntax.PASSWORD_ONLY -> "IDENTIFY $password"
         }
     return nickServMessage(body)
 }

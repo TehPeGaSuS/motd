@@ -92,11 +92,26 @@
     <string name="onboarding_auth_nickserv_syntax">IDENTIFY syntax</string>
     <string name="onboarding_auth_nickserv_nick_password">Nickname, then password</string>
     <string name="onboarding_auth_nickserv_password_nick">Password, then nickname</string>
+    <string name="onboarding_auth_nickserv_password_only">Password only</string>
     <string name="onboarding_auth_nickserv_recovery">Recover preferred nickname automatically</string>
     <string name="onboarding_auth_nickserv_sequence">Recovery commands</string>
     <string name="onboarding_auth_nickserv_sequence_desc">Comma-separated command names, such as REGAIN or GHOST,REGAIN.</string>
     <string name="onboarding_auth_choose_cert">Choose certificate</string>
     <string name="onboarding_auth_cert_selected">Certificate: %1$s</string>
+    <string name="network_guidance_title">%1$s account setup</string>
+    <string name="network_guidance_libera">New account: connect with Authentication set to None, register, and verify your email; then return to Network settings. Existing account: select SASL PLAIN. SASL username is your account name (main registered nick); Password is your account password.</string>
+    <string name="network_guidance_oftc">OFTC does not support SASL. Register with NickServ after connecting, then return here and use None, NickServ password, and Nickname, then password. CertFP is available as an advanced option in the official guide.</string>
+    <string name="network_guidance_efnet">EFnet has no network account or nickname registration. Use an available nickname and leave Authentication set to None with credential fields blank.</string>
+    <string name="network_guidance_ircnet">IRCnet nicknames are independent from accounts. Create a web SASL account and PLAIN credential, then select SASL PLAIN. SASL username is your web login ID, not your nickname; Password is the credential password.</string>
+    <string name="network_guidance_dalnet">DALnet does not support SASL. Connect with None, register your nickname, and confirm your email; then return here and use NickServ password with Nickname, then password.</string>
+    <string name="network_guidance_rizon">New account: connect with Authentication set to None, register your nickname, and confirm your email; then return to Network settings. Existing account: select SASL PLAIN. SASL username is your registered nickname/account; Password is your NickServ password.</string>
+    <string name="network_guidance_snoonet">New account: connect with Authentication set to None, register your nickname, and verify it; then return to Network settings. Existing account: select SASL PLAIN. SASL username is your main NickServ account; Password is your account password.</string>
+    <string name="network_guidance_irchighway">IRCHighWay does not support SASL. Register your nickname after connecting, then return here and use None, NickServ password, and Password only.</string>
+    <string name="network_guidance_quakenet">QuakeNet Q accounts are not SASL or NickServ accounts. Leave motd Authentication set to None, register a Q account, then authenticate manually after connecting with the official /auth flow.</string>
+    <string name="network_guidance_undernet">Undernet nicknames are not registered; a CService username is separate. Leave Authentication set to None. Optional Login on Connect goes in Server password using the official PASS form, such as +x! username password. This preset is unencrypted.</string>
+    <string name="network_guidance_registration_link">Registration guide</string>
+    <string name="network_guidance_login_link">Login/SASL guide</string>
+    <string name="network_guidance_network_link">Network information</string>
     <!-- soju bouncer auth: always SASL PLAIN, no picker (WP-S2) -->
     <string name="onboarding_auth_soju_password">Password</string>
     <!-- Password field show/hide toggle -->

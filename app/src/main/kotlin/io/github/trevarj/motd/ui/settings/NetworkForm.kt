@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.settings
 
 import android.security.KeyChain
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
@@ -22,8 +23,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +57,9 @@ import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
+import io.github.trevarj.motd.ui.settings.addnetwork.NetworkGuidanceKind
+import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPreset
+import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.theme.MotdMotion
 
 /**
@@ -81,6 +88,7 @@ fun NetworkForm(
     // live on the AUTH step and username/realname default to the nick.
     showIdentity: Boolean = true,
     showNick: Boolean = false,
+    preset: NetworkPreset? = null,
 ) {
     Column(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -113,6 +121,7 @@ fun NetworkForm(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(top = 8.dp),
             )
+            preset?.let { NetworkGuidanceCard(it) }
             AuthSection(auth = auth, onAuthChange = onAuthChange)
         }
     }
@@ -627,6 +636,12 @@ private fun AuthSection(
                                     stringResource(R.string.onboarding_auth_nickserv_password_nick),
                                     onAuthChange,
                                 )
+                                NickServSyntaxOption(
+                                    NickServIdentifySyntax.PASSWORD_ONLY,
+                                    auth,
+                                    stringResource(R.string.onboarding_auth_nickserv_password_only),
+                                    onAuthChange,
+                                )
                             }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -671,6 +686,67 @@ private fun AuthSection(
         }
     }
 }
+
+@Composable
+private fun NetworkGuidanceCard(preset: NetworkPreset) {
+    val uriHandler = LocalUriHandler.current
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().testTag("network_guidance_card"),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                stringResource(R.string.network_guidance_title, preset.displayName),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                stringResource(preset.guidanceTextRes()),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = { uriHandler.openUri(preset.registrationUrl) },
+                    modifier = Modifier.testTag("network_registration_guide_link"),
+                ) {
+                    Text(
+                        stringResource(
+                            if (preset.guidance == NetworkGuidanceKind.NO_REGISTRATION) {
+                                R.string.network_guidance_network_link
+                            } else {
+                                R.string.network_guidance_registration_link
+                            },
+                        ),
+                    )
+                }
+                preset.loginUrl?.let { url ->
+                    TextButton(
+                        onClick = { uriHandler.openUri(url) },
+                        modifier = Modifier.testTag("network_login_guide_link"),
+                    ) { Text(stringResource(R.string.network_guidance_login_link)) }
+                }
+            }
+        }
+    }
+}
+
+@StringRes
+private fun NetworkPreset.guidanceTextRes(): Int =
+    when (id) {
+        NetworkPresetId.LIBERA -> R.string.network_guidance_libera
+        NetworkPresetId.OFTC -> R.string.network_guidance_oftc
+        NetworkPresetId.EFNET -> R.string.network_guidance_efnet
+        NetworkPresetId.IRCNET -> R.string.network_guidance_ircnet
+        NetworkPresetId.DALNET -> R.string.network_guidance_dalnet
+        NetworkPresetId.RIZON -> R.string.network_guidance_rizon
+        NetworkPresetId.SNOONET -> R.string.network_guidance_snoonet
+        NetworkPresetId.IRCHIGHWAY -> R.string.network_guidance_irchighway
+        NetworkPresetId.QUAKENET -> R.string.network_guidance_quakenet
+        NetworkPresetId.UNDERNET -> R.string.network_guidance_undernet
+        NetworkPresetId.CUSTOM -> error("Custom networks do not have guidance")
+    }
 
 @Composable
 private fun NickServSyntaxOption(

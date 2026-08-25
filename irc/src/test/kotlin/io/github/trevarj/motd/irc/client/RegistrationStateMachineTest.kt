@@ -90,7 +90,7 @@ class RegistrationStateMachineTest {
     }
 
     @Test
-    fun `NickServ identify supports both argument orders after welcome`() {
+    fun `NickServ identify supports all argument forms after welcome`() {
         val base =
             IrcClientConfig(
                 host = "irc.example",
@@ -127,6 +127,20 @@ class RegistrationStateMachineTest {
         assertEquals(
             listOf("PRIVMSG NickServ :IDENTIFY nick-secret motd"),
             passwordNick
+                .onMessage(
+                    IrcMessage(command = "001", params = listOf("motd", "Welcome")),
+                ).sentLines(),
+        )
+
+        val passwordOnly =
+            RegistrationStateMachine(
+                base.copy(nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_ONLY),
+            )
+        passwordOnly.start()
+        passwordOnly.onMessage(cap("LS", ""))
+        assertEquals(
+            listOf("PRIVMSG NickServ :IDENTIFY nick-secret"),
+            passwordOnly
                 .onMessage(
                     IrcMessage(command = "001", params = listOf("motd", "Welcome")),
                 ).sentLines(),
