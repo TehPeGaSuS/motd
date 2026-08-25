@@ -1653,6 +1653,17 @@ interface MemberDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(m: MemberEntity)
 
+    @Query(
+        """UPDATE members SET isBot = :isBot WHERE nick = :nick AND bufferId IN (
+           SELECT id FROM buffers WHERE networkId = :networkId
+        )""",
+    )
+    suspend fun setBot(
+        networkId: Long,
+        nick: String,
+        isBot: Boolean,
+    )
+
     @Query("DELETE FROM members WHERE bufferId = :bufferId AND nick = :nick")
     suspend fun remove(
         bufferId: Long,
@@ -1762,6 +1773,7 @@ interface UserDao {
                 account = source.account ?: destination?.account,
                 hostmask = source.hostmask ?: destination?.hostmask,
                 realname = source.realname ?: destination?.realname,
+                isBot = source.isBot || destination?.isBot == true,
             ),
         )
         delete(nid, from)

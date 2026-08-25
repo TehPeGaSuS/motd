@@ -35,6 +35,7 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.client.whoxFlagsIndicateBot
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
@@ -256,6 +257,7 @@ class EventProcessor
             val identityRules: IrcIdentityRules,
             @Volatile var prefixModes: Map<Char, Char> = emptyMap(),
             @Volatile var chanModes: List<Set<Char>> = emptyList(),
+            @Volatile var botMode: Char? = null,
         ) {
             fun setNick(nick: String) {
                 selfNick = nick
@@ -319,6 +321,7 @@ class EventProcessor
                     identityRules = identityRules,
                     prefixModes = parsePrefixModes(isupport["PREFIX"]),
                     chanModes = isupport["CHANMODES"]?.split(',')?.map(String::toSet).orEmpty(),
+                    botMode = isupport["BOT"]?.singleOrNull(),
                 )
             recordIdentityDiagnostic(networkId, identityRules)
         }
@@ -713,6 +716,7 @@ class EventProcessor
                     text = storedText,
                     ircFormattedText = ircFormattedText,
                     isSelf = sourceIsSelf,
+                    isBot = e.isBot,
                     hasMention = hasMention,
                     replyToMsgid = e.replyToMsgid,
                     dedupKey = SemanticIdentity.keyFor(e.ctx, identitySender, ircFormattedText ?: storedText),
@@ -2846,8 +2850,9 @@ class EventProcessor
             if (buffers.isNotEmpty()) {
                 db.withTransaction {
                     for (bufferId in buffers) {
+                        val member = memberDao.allNow(bufferId).firstOrNull { it.nick == e.from }
                         memberDao.remove(bufferId, e.from)
-                        memberDao.upsert(MemberEntity(bufferId, e.to))
+                        memberDao.upsert(member?.copy(nick = e.to) ?: MemberEntity(bufferId, e.to))
                         if (e.ctx.batchId == null) {
                             journal(networkId, bufferId, RosterDelta.Rename(e.from, e.to))
                         }
@@ -2909,13 +2914,16 @@ class EventProcessor
             val st = stateFor(networkId)
             val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
             val deltas = rosterSnapshots.remove(RosterKey(networkId, bufferId)).orEmpty()
-            val replay =
-                replayRosterDeltas(
-                    bufferId,
-                    e.members.map { MemberEntity(bufferId, it.nick, it.prefixes) },
-                    deltas,
-                    st,
-                )
+            val snapshot =
+                e.members.map { member ->
+                    MemberEntity(
+                        bufferId,
+                        member.nick,
+                        member.prefixes,
+                        isBot = userDao.byNick(networkId, st.normalize(member.nick))?.isBot == true,
+                    )
+                }
+            val replay = replayRosterDeltas(bufferId, snapshot, deltas, st)
             db.withTransaction {
                 memberDao.replaceAll(bufferId, replay.members)
                 e.members.forEach { member ->
@@ -2943,6 +2951,7 @@ class EventProcessor
             networkId: Long,
             row: IrcEvent.WhoxRow,
         ) {
+            val botMode = stateFor(networkId).botMode
             upsertUser(networkId, row.nick) { existing ->
                 val hostmask =
                     if (row.username != null && row.host != null) {
@@ -2956,7 +2965,11 @@ class EventProcessor
                     account = row.account,
                     away = row.flags?.let { 'G' in it } ?: existing.away,
                     realname = row.realname?.takeIf(String::isNotBlank) ?: existing.realname,
+                    isBot = botMode?.let { whoxFlagsIndicateBot(row.flags, it) } ?: existing.isBot,
                 )
+            }
+            botMode?.let { mode ->
+                memberDao.setBot(networkId, row.nick, whoxFlagsIndicateBot(row.flags, mode))
             }
         }
 

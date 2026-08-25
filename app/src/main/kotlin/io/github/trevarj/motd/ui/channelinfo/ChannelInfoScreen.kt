@@ -80,6 +80,7 @@ import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AvatarEditorSheet
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.avatarsHidden
+import io.github.trevarj.motd.ui.components.botDisplayName
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -862,7 +863,7 @@ private fun MemberRow(
     modifier: Modifier = Modifier,
 ) {
     ListItem(
-        headlineContent = { Text(member.prefixes.take(1) + member.nick) },
+        headlineContent = { Text(member.prefixes.take(1) + botDisplayName(member.nick, member.isBot)) },
         // Dropping the whole slot (rather than an empty one) lets the nick start at the content edge.
         leadingContent =
             if (avatarsHidden()) {

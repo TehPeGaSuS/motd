@@ -364,6 +364,7 @@ data class TimelineEventEntity(
     /** Exact IRC-formatted payload used for rendering, retries, and protocol identity. */
     val ircFormattedText: String? = null,
     val isSelf: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val isBot: Boolean = false,
     val hasMention: Boolean = false, // computed at insert by EventProcessor
     val replyToMsgid: String? = null,
     val replyToEventId: TimelineEventId? = null,
@@ -708,6 +709,7 @@ data class UserEntity(
     val away: Boolean = false,
     val hostmask: String? = null,
     val realname: String? = null,
+    @ColumnInfo(defaultValue = "0") val isBot: Boolean = false,
 )
 
 @Entity(tableName = "members", primaryKeys = ["bufferId", "nick"])
@@ -715,4 +717,5 @@ data class MemberEntity(
     val bufferId: Long,
     val nick: String,
     val prefixes: String = "",
+    @ColumnInfo(defaultValue = "0") val isBot: Boolean = false,
 )

@@ -802,6 +802,7 @@ class CanonicalTimelineStore
                     } else {
                         existing.isSelf || incoming.isSelf
                     },
+                isBot = existing.isBot || incoming.isBot,
                 hasMention = existing.hasMention || incoming.hasMention,
                 replyToMsgid = existing.replyToMsgid ?: incoming.replyToMsgid,
                 replyToEventId = existing.replyToEventId ?: incoming.replyToEventId,

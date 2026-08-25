@@ -19,6 +19,12 @@ import org.junit.Test
 
 class MessageBubbleTextTest {
     @Test
+    fun bot_indicator_only_changes_the_display_label() {
+        assertEquals("helper 🤖", botDisplayName("helper", isBot = true))
+        assertEquals("helper", botDisplayName("helper", isBot = false))
+    }
+
+    @Test
     fun mention_membership_uses_active_irc_casemapping() {
         val rfc = IrcIdentityRules(IrcCaseMapping.Rfc1459)
         val strict = IrcIdentityRules(IrcCaseMapping.Rfc1459Strict)

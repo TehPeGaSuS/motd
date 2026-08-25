@@ -170,7 +170,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32)
+                .addMigrations(MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33)
                 .build()
         try {
             migrated.openHelper.writableDatabase
@@ -240,7 +240,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32)
+                .addMigrations(MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -314,7 +314,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_30_31, MIGRATION_31_32)
+                .addMigrations(MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -382,6 +382,8 @@ class AllMigrationsTest {
                            (3, 2, 3000, 'bob', 'bob', 'PRIVMSG', 'channel', 0, 1, 0, 'm3',
                             1, 3, 0, 'SERVER_TAG', 0, 0, 0, NULL)""",
             )
+            execSQL("INSERT INTO users(networkId, nick, away) VALUES (1, 'alice', 0)")
+            execSQL("INSERT INTO members(bufferId, nick, prefixes) VALUES (2, 'alice', '')")
         }
         legacyHelper!!.close()
         legacyHelper = null
@@ -389,7 +391,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_31_32)
+                .addMigrations(MIGRATION_31_32, MIGRATION_32_33)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -401,9 +403,13 @@ class AllMigrationsTest {
                 check(cursor.moveToFirst())
                 assertTrue(cursor.isNull(0))
             }
-            sqlite.query("SELECT COUNT(*) FROM messages").use { cursor ->
+            sqlite.query("SELECT COUNT(*), SUM(isBot) FROM messages").use { cursor ->
                 check(cursor.moveToFirst())
                 assertEquals(3, cursor.getInt(0))
+                assertEquals(0, cursor.getInt(1))
+            }
+            sqlite.query("SELECT isBot FROM users UNION ALL SELECT isBot FROM members").use { cursor ->
+                while (cursor.moveToNext()) assertEquals(0, cursor.getInt(0))
             }
             sqlite.query("PRAGMA index_list(messages)").use { cursor ->
                 val name = cursor.getColumnIndexOrThrow("name")
@@ -483,10 +489,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 32` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 33` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 32
+        const val DECLARED_VERSION = 33
     }
 }

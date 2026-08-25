@@ -1581,6 +1581,7 @@ private fun MessageRow(
                     timeMs = msg.serverTime,
                     formattedTime = formattedTime,
                     isSelf = msg.isSelf,
+                    isBot = msg.isBot,
                     kind = msg.kind,
                     showSender = showSender,
                     hasMention = msg.hasMention,

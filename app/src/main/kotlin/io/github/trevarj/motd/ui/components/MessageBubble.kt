@@ -207,6 +207,11 @@ private fun Modifier.mentionHighlight(accent: Color): Modifier =
  * bubbles are right-aligned `primaryContainer`; others left `surfaceContainerHigh`. Corner radii
  * tighten on the grouped inner edge.
  */
+internal fun botDisplayName(
+    sender: String,
+    isBot: Boolean,
+): String = if (isBot) "$sender 🤖" else sender
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessageBubble(
@@ -214,6 +219,7 @@ fun MessageBubble(
     text: String,
     timeMs: Long,
     isSelf: Boolean,
+    isBot: Boolean = false,
     kind: MessageKind,
     showSender: Boolean,
     modifier: Modifier = Modifier,
@@ -271,6 +277,7 @@ fun MessageBubble(
                 text = text,
                 formattedTime = displayedTime,
                 isSelf = isSelf,
+                isBot = isBot,
                 nickColors = nickColors,
                 modifier = renderedModifier,
                 hasMention = mentionHighlighted,
@@ -298,6 +305,7 @@ fun MessageBubble(
                 text = text,
                 formattedTime = displayedTime,
                 isSelf = isSelf,
+                isBot = isBot,
                 nickColors = nickColors,
                 spacing = spacing,
                 networkId = networkId,
@@ -335,6 +343,7 @@ fun MessageBubble(
             text = text,
             formattedTime = displayedTime,
             isSelf = isSelf,
+            isBot = isBot,
             kind = kind,
             nickColors = nickColors,
             modifier = renderedModifier,
@@ -371,6 +380,7 @@ fun MessageBubble(
             text = text,
             formattedTime = displayedTime,
             isSelf = isSelf,
+            isBot = isBot,
             kind = kind,
             nickColors = nickColors,
             spacing = spacing,
@@ -470,7 +480,7 @@ fun MessageBubble(
                     modifier = if (onSenderClick != null) Modifier.clickable(onClick = onSenderClick) else Modifier,
                 ) {
                     Text(
-                        text = sender,
+                        text = botDisplayName(sender, isBot),
                         color = nameColor,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
@@ -604,6 +614,7 @@ private fun ComfortableActionBubble(
     text: String,
     formattedTime: String,
     isSelf: Boolean,
+    isBot: Boolean,
     nickColors: NickColorScheme,
     spacing: io.github.trevarj.motd.ui.theme.MotdSpacing,
     networkId: Long?,
@@ -684,6 +695,7 @@ private fun ComfortableActionBubble(
     val actionLine =
         remember(
             sender,
+            isBot,
             text,
             nameColor,
             bodyColor,
@@ -697,7 +709,7 @@ private fun ComfortableActionBubble(
             hideAvatar,
         ) {
             buildActionLine(
-                sender = sender,
+                sender = botDisplayName(sender, isBot),
                 text = text,
                 accentColor = bodyColor,
                 nameColor = nameColor,
@@ -833,6 +845,7 @@ private fun ActionMessageRow(
     text: String,
     formattedTime: String,
     isSelf: Boolean,
+    isBot: Boolean,
     nickColors: NickColorScheme,
     modifier: Modifier = Modifier,
     hasMention: Boolean = false,
@@ -895,6 +908,7 @@ private fun ActionMessageRow(
     val actionLine =
         remember(
             sender,
+            isBot,
             text,
             accent,
             nameColor,
@@ -908,7 +922,7 @@ private fun ActionMessageRow(
             senderLink,
         ) {
             buildActionLine(
-                sender = sender,
+                sender = botDisplayName(sender, isBot),
                 text = text,
                 accentColor = accent,
                 nameColor = nameColor,
@@ -1142,6 +1156,7 @@ private fun TwoLineMessageRow(
     text: String,
     formattedTime: String,
     isSelf: Boolean,
+    isBot: Boolean,
     kind: MessageKind,
     nickColors: NickColorScheme,
     spacing: io.github.trevarj.motd.ui.theme.MotdSpacing,
@@ -1216,7 +1231,7 @@ private fun TwoLineMessageRow(
                     )
                 }
                 Text(
-                    text = sender,
+                    text = botDisplayName(sender, isBot),
                     color = nameColor,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,

@@ -403,6 +403,7 @@ class EventMapper(
             text = text,
             isSelf = isSelf(msg.source),
             replyToMsgid = msg.replyReference(),
+            isBot = "bot" in msg.tags,
         )
     }
 

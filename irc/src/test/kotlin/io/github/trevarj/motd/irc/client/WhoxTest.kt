@@ -24,6 +24,12 @@ class WhoxTest {
             .onSuccess { error("out-of-range token accepted") }
     }
 
+    @Test fun `advertised bot mode identifies only matching WHO flags`() {
+        assertTrue(whoxFlagsIndicateBot("H@B", 'B'))
+        assertFalse(whoxFlagsIndicateBot("H@", 'B'))
+        assertFalse(whoxFlagsIndicateBot("HB", null))
+    }
+
     @Test fun `token pool wraps and reports exhaustion without collision`() {
         val pool = WhoxTokenPool(size = 3)
         assertEquals(listOf(0, 1, 2), listOf(pool.acquire(), pool.acquire(), pool.acquire()))

@@ -4,6 +4,11 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
+fun whoxFlagsIndicateBot(
+    flags: String?,
+    botMode: Char?,
+): Boolean = botMode != null && flags?.contains(botMode) == true
+
 internal object WhoxCommands {
     const val FIELDS = "tuhnafr"
 

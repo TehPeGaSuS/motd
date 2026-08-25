@@ -5,6 +5,7 @@ import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Isupport
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -36,6 +37,17 @@ class EventMapperMessageTagsTest {
 
         assertEquals(ServerTimeSource.TAG, tagged.ctx.serverTimeSource)
         assertEquals(ServerTimeSource.LOCAL, local.ctx.serverTimeSource)
+    }
+
+    @Test
+    fun `bare bot tag marks chat messages and ignores its value`() {
+        val bot = mapper.map(IrcMessage.parse("@bot :alice!u@h PRIVMSG #chan :hello")) as IrcEvent.ChatMessage
+        val valued = mapper.map(IrcMessage.parse("@bot=future :alice!u@h NOTICE me :hello")) as IrcEvent.ChatMessage
+        val human = mapper.map(IrcMessage.parse(":alice!u@h PRIVMSG #chan :hello")) as IrcEvent.ChatMessage
+
+        assertTrue(bot.isBot)
+        assertTrue(valued.isBot)
+        assertFalse(human.isBot)
     }
 
     @Test

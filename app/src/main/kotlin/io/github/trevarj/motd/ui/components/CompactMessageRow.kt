@@ -62,6 +62,7 @@ internal fun CompactMessageRow(
     text: String,
     formattedTime: String,
     isSelf: Boolean,
+    isBot: Boolean,
     kind: MessageKind,
     nickColors: NickColorScheme,
     modifier: Modifier = Modifier,
@@ -117,6 +118,7 @@ internal fun CompactMessageRow(
             sender,
             text,
             kind,
+            isBot,
             nameColor,
             bodyColor,
             linkColor,
@@ -136,6 +138,7 @@ internal fun CompactMessageRow(
                 linkColor,
                 friendTint,
                 showSender,
+                isBot,
                 mentionColor,
                 codeBackground,
                 codeColor,
@@ -231,6 +234,7 @@ internal fun buildCompactLine(
     linkColor: Color,
     friendTint: Color,
     showSender: Boolean = true,
+    isBot: Boolean = false,
     mentionColor: (String) -> Color? = { null },
     codeBackground: Color = Color.Unspecified,
     codeColor: Color = Color.Unspecified,
@@ -249,12 +253,12 @@ internal fun buildCompactLine(
             when (kind) {
                 MessageKind.NOTICE -> {
                     // irssi-style notice marker: `-nick-`.
-                    withStyle(nickStyle) { append("-$sender-") }
+                    withStyle(nickStyle) { append("-${botDisplayName(sender, isBot)}-") }
                     append(" ")
                 }
 
                 else -> {
-                    withStyle(nickStyle) { append(sender) }
+                    withStyle(nickStyle) { append(botDisplayName(sender, isBot)) }
                     withStyle(SpanStyle(color = bodyColor)) { append(": ") }
                 }
             }

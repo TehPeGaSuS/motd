@@ -72,6 +72,7 @@ sealed interface IrcEvent {
         val text: String,
         val isSelf: Boolean, // echo-message or self-inserted
         val replyToMsgid: String?, // +draft/reply
+        val isBot: Boolean = false, // IRCv3 bot message tag
     ) : IrcEvent
 
     data class TagMessage( // TAGMSG: typing + react

@@ -1895,6 +1895,7 @@ private fun isupportToMap(isupport: Isupport): Map<String, String> {
         "BOUNCER_NETID",
         "VAPID",
         "NETWORK",
+        "BOT",
         "CLIENTTAGDENY",
         "soju.im/FILEHOST",
     )) {
