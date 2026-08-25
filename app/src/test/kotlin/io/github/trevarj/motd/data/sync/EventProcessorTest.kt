@@ -822,6 +822,28 @@ class EventProcessorTest {
         }
 
     @Test
+    fun privateMessageWithChannelContextRoutesIntoTheChannel() =
+        runTest {
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx = ctx(msgid = "context").copy(clientTags = mapOf("+channel-context" to "#help")),
+                    kind = IrcEvent.ChatKind.NOTICE,
+                    source = Prefix("helperbot"),
+                    target = "me",
+                    text = "private help",
+                    isSelf = false,
+                    replyToMsgid = null,
+                ),
+            )
+
+            val channel = db.bufferDao().byName(networkId, "#help")
+            assertEquals(BufferType.CHANNEL, channel?.type)
+            assertEquals("private help", pagingList(channel!!.id).single().text)
+            assertNull(db.bufferDao().byName(networkId, "helperbot"))
+        }
+
+    @Test
     fun dismissedQueryDropsOldHistoryAndRevivesForNewDm() =
         runTest {
             processor.process(

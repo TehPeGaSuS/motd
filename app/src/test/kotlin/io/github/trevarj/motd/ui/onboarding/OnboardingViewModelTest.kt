@@ -99,6 +99,7 @@ class OnboardingViewModelTest {
             bufferId: Long,
             text: String,
             replyToEventId: Long?,
+            channelContext: String?,
         ) = SendAcceptance.Accepted(emptyList())
 
         override suspend fun ensureQueryBuffer(

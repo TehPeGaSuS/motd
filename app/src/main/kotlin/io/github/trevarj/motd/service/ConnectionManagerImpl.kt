@@ -1535,6 +1535,7 @@ class ConnectionManagerImpl
                 oldLabel = event.label,
                 text = pending.text,
                 replyToMsgid = wireReply,
+                channelContext = pending.channelContext,
             )
         }
 
@@ -1546,6 +1547,7 @@ class ConnectionManagerImpl
             oldLabel: String,
             text: String,
             replyToMsgid: String?,
+            channelContext: String?,
         ): ImmediateWireAcceptance {
             val chunks = prepareOutgoingMessageChunks(text, isBouncerServ = false)
             if (chunks.isEmpty()) {
@@ -1577,6 +1579,7 @@ class ConnectionManagerImpl
                 eventIds = replanned.events.map { it.eventId },
                 replyToMsgid = replyToMsgid,
                 forceLegacy = true,
+                channelContext = channelContext,
             )
         }
 
@@ -2075,6 +2078,7 @@ class ConnectionManagerImpl
             networkId: Long,
             originBufferId: Long,
             message: IrcMessage,
+            channelContext: String?,
         ) {
             val buffer = bufferDao.observeById(originBufferId) ?: return
             if (buffer.networkId != networkId) return
@@ -2093,6 +2097,13 @@ class ConnectionManagerImpl
                 }
             }
             val label = newOutgoingLabel().takeIf { client.hasCap("labeled-response") }
+            val ready = client.state.value as? IrcClientState.Ready
+            val contextTag =
+                channelContext?.takeIf { context ->
+                    message.command == "NOTICE" && message.params.firstOrNull()?.let(client.isupport::isChannel) == false &&
+                        client.isupport.isChannel(context) && ready != null &&
+                        canSendClientTag(ready.caps, ready.isupport, "+channel-context")
+                }
             val sessionId =
                 eventProcessor.beginCommandResponse(
                     networkId = networkId,
@@ -2100,7 +2111,13 @@ class ConnectionManagerImpl
                     command = message.command,
                     label = label,
                 )
-            val tagged = if (label == null) message else message.copy(tags = message.tags + ("label" to label))
+            val tags =
+                message.tags +
+                    listOfNotNull(
+                        label?.let { "label" to it },
+                        contextTag?.let { "+channel-context" to it },
+                    )
+            val tagged = message.copy(tags = tags)
             val sent =
                 try {
                     client.sendIfConnected(tagged)
@@ -2124,6 +2141,7 @@ class ConnectionManagerImpl
             bufferId: Long,
             text: String,
             replyToEventId: Long?,
+            channelContext: String?,
         ): SendAcceptance =
             sendLifecycle.sending {
                 ensurePendingRecovered()
@@ -2212,6 +2230,7 @@ class ConnectionManagerImpl
                                     },
                                 replyToEventId = parent?.id,
                                 replyToMsgid = parent?.msgid,
+                                channelContext = channelContext,
                             )
                         }
                     } catch (_: Exception) {
@@ -2230,6 +2249,7 @@ class ConnectionManagerImpl
                                 planned = planned,
                                 eventIds = eventIds,
                                 replyToMsgid = delivery.wireReplyToMsgid,
+                                channelContext = channelContext,
                             )
                         },
                         secondaryEffect = { notifyOutgoingAccepted(buffer.id) },
@@ -2307,7 +2327,15 @@ class ConnectionManagerImpl
                                 parent?.msgid?.takeIf {
                                     ready != null && canSendClientTag(ready.caps, ready.isupport, "+reply")
                                 }
-                            writeDurablePlan(retryBuffer, client, ready, planned, listOf(retry.id), wireReply)
+                            writeDurablePlan(
+                                retryBuffer,
+                                client,
+                                ready,
+                                planned,
+                                listOf(retry.id),
+                                wireReply,
+                                channelContext = retry.channelContext,
+                            )
                         },
                         secondaryEffect = { notifyOutgoingAccepted(currentBuffer.id) },
                     )
@@ -2329,6 +2357,7 @@ class ConnectionManagerImpl
             eventIds: List<Long>,
             replyToMsgid: String?,
             forceLegacy: Boolean = false,
+            channelContext: String? = null,
         ): ImmediateWireAcceptance {
             if (planned.size != eventIds.size) {
                 eventProcessor.failPendingEvents(eventIds)
@@ -2349,6 +2378,7 @@ class ConnectionManagerImpl
                         oldLabel = item.label,
                         text = item.chunk.ircFormattedText ?: item.chunk.displayText,
                         replyToMsgid = replyToMsgid,
+                        channelContext = channelContext,
                     )
                 }
             }
@@ -2356,7 +2386,16 @@ class ConnectionManagerImpl
                 eventIds = eventIds,
                 write = { index ->
                     val item = planned[index]
-                    if (client.sendMessage(buffer.ircTarget, item.chunk.wireText, replyToMsgid, item.label, forceLegacy)) {
+                    if (
+                        client.sendMessage(
+                            buffer.ircTarget,
+                            item.chunk.wireText,
+                            replyToMsgid,
+                            item.label,
+                            forceLegacy,
+                            channelContext,
+                        )
+                    ) {
                         ImmediateWireAcceptance.ACCEPTED
                     } else {
                         ImmediateWireAcceptance.DISCONNECTED

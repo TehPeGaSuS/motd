@@ -26,6 +26,17 @@ fun canSendClientTag(
     tag: String,
 ): Boolean = caps.any { it.substringBefore('=') == "message-tags" } && clientTagAllowed(isupport, tag)
 
+/** Valid private-message channel context; accepts the deployed draft alias on ingress. */
+fun validChannelContext(
+    clientTags: Map<String, String>,
+    target: String,
+    isChannel: (String) -> Boolean,
+): String? {
+    if (isChannel(target)) return null
+    return (clientTags["+channel-context"] ?: clientTags["+draft/channel-context"])
+        ?.takeIf(isChannel)
+}
+
 fun canSendReactionTags(
     caps: Set<String>,
     isupport: Map<String, String>,

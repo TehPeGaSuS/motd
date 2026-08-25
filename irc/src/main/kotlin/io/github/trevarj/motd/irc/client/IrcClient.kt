@@ -1055,10 +1055,16 @@ class IrcClient(
         replyToMsgid: String?,
         label: String,
         forceLegacy: Boolean = false,
+        channelContext: String? = null,
     ): Boolean {
         requireValidChatLabel(label)
         val t = transport ?: return false
         val labelTag = label.takeIf { hasCap("labeled-response") }
+        val contextTag =
+            channelContext?.takeIf {
+                !_isupport.get().isChannel(target) && _isupport.get().isChannel(it) &&
+                    canSendClientTag(ackedCaps.get(), isupportToMap(_isupport.get()), "+channel-context")
+            }
         val plan =
             planChatMessage(
                 target = target,
@@ -1067,6 +1073,7 @@ class IrcClient(
                 label = labelTag,
                 multilineLimits = if (hasMultilineWireSupport() && !forceLegacy) multilineLimits else null,
                 forceLegacy = forceLegacy,
+                protocolTags = contextTag?.let { mapOf("+channel-context" to it) }.orEmpty(),
             ) ?: return false
         // Do NOT register a correlator deferred: the labeled echo must flow through as a normal
         // self ChatMessage event (carrying label in ctx) so the app can dedup the pending row.

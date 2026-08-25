@@ -35,6 +35,7 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.client.validChannelContext
 import io.github.trevarj.motd.irc.client.whoxFlagsIndicateBot
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
@@ -3690,6 +3691,7 @@ class EventProcessor
             events: List<OutgoingEventPlan>,
             replyToEventId: TimelineEventId?,
             replyToMsgid: String?,
+            channelContext: String? = null,
         ): List<DurableOutgoingEvent> {
             require(events.isNotEmpty()) { "outgoing plan is empty" }
             val networkId =
@@ -3727,6 +3729,7 @@ class EventProcessor
                                         hasMention = false,
                                         replyToMsgid = replyToMsgid,
                                         replyToEventId = replyToEventId,
+                                        channelContext = channelContext,
                                         pendingLabel = event.label,
                                         dedupKey = SemanticIdentity.pendingKey(event.label),
                                         serverTimeAuthoritative = false,
@@ -4011,9 +4014,14 @@ class EventProcessor
             historyTarget: String?,
             origin: EventOrigin,
         ): ChatRoute {
-            val active = historyTarget?.let { activeHistoryTargets[networkId] }
+            val channelContext = validChannelContext(event.ctx.clientTags, event.target, st::isChannel)
+            val active = historyTarget?.let { activeHistoryTargets[networkId] }.takeIf { channelContext == null }
             val type =
-                active?.type ?: if (isChannel(networkId, event.target, st)) {
+                if (channelContext != null) {
+                    BufferType.CHANNEL
+                } else if (active != null) {
+                    active.type
+                } else if (isChannel(networkId, event.target, st)) {
                     BufferType.CHANNEL
                 } else {
                     BufferType.QUERY
@@ -4071,7 +4079,7 @@ class EventProcessor
                     }
                 }
             val bufferName =
-                active?.target ?: if (isDm) {
+                channelContext ?: active?.target ?: if (isDm) {
                     historyPeer ?: if (sourceIsSelf) event.target else event.source.nick
                 } else {
                     event.target

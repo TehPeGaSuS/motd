@@ -68,6 +68,7 @@ internal open class NoopConnectionManager(
         bufferId: Long,
         text: String,
         replyToEventId: TimelineEventId?,
+        channelContext: String?,
     ): SendAcceptance = SendAcceptance.Accepted(emptyList())
 
     override suspend fun retryMessage(eventId: TimelineEventId): SendAcceptance = SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)

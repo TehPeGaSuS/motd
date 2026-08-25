@@ -368,6 +368,7 @@ data class TimelineEventEntity(
     val hasMention: Boolean = false, // computed at insert by EventProcessor
     val replyToMsgid: String? = null,
     val replyToEventId: TimelineEventId? = null,
+    val channelContext: String? = null,
     val pendingLabel: String? = null, // set while awaiting echo; null once confirmed
     val failed: Boolean = false, // echo timeout -> retry UI
     /** Diagnostic compatibility value. Identity is enforced only by event_aliases. */

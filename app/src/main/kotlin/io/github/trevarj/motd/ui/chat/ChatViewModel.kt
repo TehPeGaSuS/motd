@@ -1536,9 +1536,13 @@ class ChatViewModel
                 is ChatCommand.Msg -> {
                     networkId?.let { nid ->
                         val target = connectionManager.ensureQueryBuffer(nid, cmd.nick)
+                        val channelContext =
+                            state.value.buffer
+                                ?.takeIf { it.type == BufferType.CHANNEL }
+                                ?.ircTarget
                         val submission = reserveDraftForSend(raw) ?: return@let
                         try {
-                            when (connectionManager.sendMessage(target, cmd.text)) {
+                            when (connectionManager.sendMessage(target, cmd.text, channelContext = channelContext)) {
                                 is SendAcceptance.Accepted -> {
                                     clearDraftSubmission(submission)
                                     onOpenBuffer(target)
@@ -1582,7 +1586,14 @@ class ChatViewModel
 
                 is ChatCommand.Notice -> {
                     networkId?.let { nid ->
-                        sendCommand(nid, IrcMessage(command = "NOTICE", params = listOf(cmd.target, cmd.text)))
+                        sendCommand(
+                            nid,
+                            IrcMessage(command = "NOTICE", params = listOf(cmd.target, cmd.text)),
+                            channelContext =
+                                state.value.buffer
+                                    ?.takeIf { it.type == BufferType.CHANNEL }
+                                    ?.ircTarget,
+                        )
                     }
                 }
 
@@ -1725,8 +1736,9 @@ class ChatViewModel
         private suspend fun sendCommand(
             networkId: Long,
             message: IrcMessage,
+            channelContext: String? = null,
         ) {
-            connectionManager.sendCommand(networkId, operationalBufferId.value, message)
+            connectionManager.sendCommand(networkId, operationalBufferId.value, message, channelContext)
         }
 
         // --- nick sheet + whois ---

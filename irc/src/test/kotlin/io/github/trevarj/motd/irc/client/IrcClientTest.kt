@@ -525,6 +525,21 @@ class IrcClientTest {
         }
 
     @Test
+    fun `private messages attach only valid allowed channel context`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft)
+
+            client.sendMessage("alice", "help", null, "motd-context", channelContext = "#support")
+            runCurrent()
+            assertTrue(ft.sent.last().startsWith("@+channel-context=#support;label=motd-context"))
+
+            client.sendMessage("#public", "no context", null, "motd-public", channelContext = "#support")
+            runCurrent()
+            assertFalse(ft.sent.last().contains("channel-context"))
+        }
+
+    @Test
     fun `chat labels reject values outside the wire-safe contract`() =
         runTest {
             val ft = FakeTransport()

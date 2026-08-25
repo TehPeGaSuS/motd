@@ -170,7 +170,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33)
+                .addMigrations(MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34)
                 .build()
         try {
             migrated.openHelper.writableDatabase
@@ -240,7 +240,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33)
+                .addMigrations(MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -314,7 +314,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33)
+                .addMigrations(MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -391,7 +391,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_31_32, MIGRATION_32_33)
+                .addMigrations(MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -403,10 +403,11 @@ class AllMigrationsTest {
                 check(cursor.moveToFirst())
                 assertTrue(cursor.isNull(0))
             }
-            sqlite.query("SELECT COUNT(*), SUM(isBot) FROM messages").use { cursor ->
+            sqlite.query("SELECT COUNT(*), SUM(isBot), COUNT(channelContext) FROM messages").use { cursor ->
                 check(cursor.moveToFirst())
                 assertEquals(3, cursor.getInt(0))
                 assertEquals(0, cursor.getInt(1))
+                assertEquals(0, cursor.getInt(2))
             }
             sqlite.query("SELECT isBot FROM users UNION ALL SELECT isBot FROM members").use { cursor ->
                 while (cursor.moveToNext()) assertEquals(0, cursor.getInt(0))
@@ -489,10 +490,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 33` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 34` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 33
+        const val DECLARED_VERSION = 34
     }
 }

@@ -806,6 +806,7 @@ class CanonicalTimelineStore
                 hasMention = existing.hasMention || incoming.hasMention,
                 replyToMsgid = existing.replyToMsgid ?: incoming.replyToMsgid,
                 replyToEventId = existing.replyToEventId ?: incoming.replyToEventId,
+                channelContext = existing.channelContext ?: incoming.channelContext,
                 pendingLabel = if (incoming.pendingLabel == null) null else existing.pendingLabel,
                 failed = if (incoming.pendingLabel == null) false else existing.failed,
                 eventKey = existing.eventKey ?: incoming.eventKey,

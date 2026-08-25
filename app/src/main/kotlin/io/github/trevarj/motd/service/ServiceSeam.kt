@@ -203,6 +203,7 @@ interface ConnectionManager {
         bufferId: Long,
         text: String,
         replyToEventId: TimelineEventId? = null,
+        channelContext: String? = null,
     ): SendAcceptance
 
     /** Retry the same durable row with a new attempt label. */
@@ -224,6 +225,7 @@ interface ConnectionManager {
         networkId: Long,
         originBufferId: Long,
         message: IrcMessage,
+        channelContext: String? = null,
     ) {
         clientFor(networkId)?.send(message)
     }

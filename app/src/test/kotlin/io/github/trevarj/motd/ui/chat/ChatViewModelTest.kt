@@ -782,7 +782,7 @@ class ChatViewModelTest {
             vm.submit("/msg alice hello there", { opened.complete(it) })
             val openedBuffer = opened.await()
 
-            assertEquals(listOf(SentMessage(query.id, "hello there", null)), manager.messages)
+            assertEquals(listOf(SentMessage(query.id, "hello there", null, channel.ircTarget)), manager.messages)
             assertEquals(query.id, openedBuffer)
         }
 
@@ -3383,6 +3383,7 @@ class ChatViewModelTest {
         val bufferId: Long,
         val text: String,
         val replyTo: Long?,
+        val channelContext: String? = null,
     )
 
     private data class SentReaction(
@@ -3487,6 +3488,7 @@ class ChatViewModelTest {
             bufferId: Long,
             text: String,
             replyToEventId: Long?,
+            channelContext: String?,
         ): io.github.trevarj.motd.service.SendAcceptance {
             sendRejection?.let {
                 return io.github.trevarj.motd.service.SendAcceptance
@@ -3497,7 +3499,7 @@ class ChatViewModelTest {
                     io.github.trevarj.motd.service.SendRejectionReason.PERSISTENCE_FAILED,
                 )
             }
-            messages += SentMessage(bufferId, text, replyToEventId)
+            messages += SentMessage(bufferId, text, replyToEventId, channelContext)
             messageStarted.complete(Unit)
             sendGate?.await()
             // Mirror the real manager, which reports what it actually persisted: a reply can gain
@@ -3543,6 +3545,7 @@ class ChatViewModelTest {
             networkId: Long,
             originBufferId: Long,
             message: IrcMessage,
+            channelContext: String?,
         ) {
             commandOrigins += originBufferId to message
             when (message.command) {
