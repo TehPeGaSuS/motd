@@ -1,0 +1,6 @@
+- Fixed hidden history pages so older backlog continues loading.
+- Added clearer network setup guidance.
+- Send Markdown as IRC formatting from Composer Tools, with color tokens and a plain-text escape.
+- Bot markers now appear in messages and member lists.
+- Private bot replies can stay grouped with their channel through IRCv3 channel context.
+- Networks can use server-advertised icons, with generated-avatar fallback.
