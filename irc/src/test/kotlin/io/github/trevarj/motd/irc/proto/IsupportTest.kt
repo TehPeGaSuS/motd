@@ -35,6 +35,14 @@ class IsupportTest {
     }
 
     @Test
+    fun `draft network icon token is case insensitive`() {
+        val isup = Isupport()
+        isup.update(listOf("draft/ICON=https://example.org/icon-{size}.png"))
+
+        assertEquals("https://example.org/icon-{size}.png", isup["draft/icon"])
+    }
+
+    @Test
     fun `flag token without value`() {
         val isup = Isupport()
         isup.update(listOf("WHOX", "SAFELIST"))

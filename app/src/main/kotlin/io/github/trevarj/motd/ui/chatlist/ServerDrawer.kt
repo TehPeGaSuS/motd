@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -49,6 +50,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
@@ -67,7 +69,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import coil.compose.AsyncImage
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.avatar.expandAvatarUrl
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -433,23 +437,34 @@ private fun DrawerNetworkItem(
                                 R.string.drawer_state_disconnected
                             },
                         )
-                    IrcNetworkBadge(
-                        name = row.name,
-                        networkId = row.networkId,
-                        status =
-                            if (connected) {
-                                LocalMotdSemanticColors.current.success
-                            } else {
-                                MaterialTheme.colorScheme.outlineVariant
-                            },
-                        size = 32.dp,
+                    Box(
                         modifier =
                             Modifier
+                                .size(32.dp)
                                 .testTag("drawer_network_icon_${row.networkId}")
-                                .semantics {
-                                    stateDescription = statusDescription
+                                .semantics { stateDescription = statusDescription },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        IrcNetworkBadge(
+                            name = row.name,
+                            networkId = row.networkId,
+                            status =
+                                if (connected) {
+                                    LocalMotdSemanticColors.current.success
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant
                                 },
-                    )
+                            size = 32.dp,
+                        )
+                        expandAvatarUrl(row.iconUrl.orEmpty(), 64)?.let { url ->
+                            AsyncImage(
+                                model = url,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.size(28.dp).clip(CircleShape),
+                            )
+                        }
+                    }
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(

@@ -44,6 +44,12 @@ interface NetworkDao {
     @Query("SELECT id FROM networks ORDER BY ordering, id")
     suspend fun idsInOrder(): List<Long>
 
+    @Query("UPDATE networks SET serverIconUrl = :url WHERE id = :id")
+    suspend fun setServerIconUrl(
+        id: Long,
+        url: String?,
+    )
+
     @Query("UPDATE networks SET ordering = :ordering WHERE id = :id")
     suspend fun setOrdering(
         id: Long,

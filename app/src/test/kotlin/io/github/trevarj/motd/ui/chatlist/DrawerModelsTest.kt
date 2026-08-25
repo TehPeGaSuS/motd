@@ -17,6 +17,7 @@ class DrawerModelsTest {
         name: String = "net$id",
         role: NetworkRole = NetworkRole.DIRECT,
         parentId: Long? = null,
+        iconUrl: String? = null,
     ) = NetworkEntity(
         id = id,
         name = name,
@@ -27,6 +28,7 @@ class DrawerModelsTest {
         nick = "me",
         username = "me",
         realname = "Me",
+        serverIconUrl = iconUrl,
     )
 
     private fun row(
@@ -64,6 +66,12 @@ class DrawerModelsTest {
         val states = mapOf(1L to IrcClientState.Ready("neo", emptySet(), emptyMap()))
         val rows = buildDrawerRows(listOf(net(1)), emptyList(), states)
         assertEquals("neo", rows[0].nick)
+    }
+
+    @Test
+    fun `server icon is carried into drawer rows`() {
+        val icon = "https://example.org/icon-{size}.png"
+        assertEquals(icon, buildDrawerRows(listOf(net(1, iconUrl = icon)), emptyList(), emptyMap()).single().iconUrl)
     }
 
     @Test

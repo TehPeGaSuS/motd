@@ -139,6 +139,8 @@ data class NetworkEntity(
     val pendingCredentialRequirements: String? = null,
     /** Desired auto-connect value restored once [pendingCredentialRequirements] has been repaired. */
     val restoreAutoConnect: Boolean = false,
+    /** Validated HTTPS icon advertised through IRCv3 draft/ICON; refreshed on registration. */
+    val serverIconUrl: String? = null,
 ) {
     // Redact secrets (saslPassword, serverPassword, nickServPassword, obfsLink) from logs; proxyHost/port are
     // non-sensitive so keep them out

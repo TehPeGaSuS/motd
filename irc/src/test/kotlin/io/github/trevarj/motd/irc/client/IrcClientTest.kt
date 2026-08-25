@@ -606,6 +606,21 @@ class IrcClientTest {
         }
 
     @Test
+    fun `network icon is exposed in ready isupport`() =
+        runTest {
+            val client =
+                registeredWithIsupport(
+                    FakeTransport(),
+                    "draft/ICON=https://example.org/icon-{size}.png",
+                )
+
+            assertEquals(
+                "https://example.org/icon-{size}.png",
+                (client.state.value as IrcClientState.Ready).isupport["draft/ICON"],
+            )
+        }
+
+    @Test
     fun `target classification waits for CHANTYPES or end of registration burst`() =
         runTest {
             val explicitTransport = FakeTransport()

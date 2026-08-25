@@ -20,6 +20,7 @@ data class DrawerRow(
     val nick: String?, // (state as? Ready)?.nick
     val unread: Int, // sum of unreadCount over the network's non-muted rows
     val mentions: Int, // sum of mentionCount over the network's non-muted rows
+    val iconUrl: String? = null,
     val unreadIncomplete: Boolean = false,
     val mentionsIncomplete: Boolean = false,
 )
@@ -85,6 +86,7 @@ fun buildDrawerRows(
             depth = depth,
             state = state,
             nick = (state as? IrcClientState.Ready)?.nick,
+            iconUrl = net.serverIconUrl,
             unread = own.unread + extra.unread,
             mentions = own.mentions + extra.mentions,
             unreadIncomplete = own.unreadIncomplete || extra.unreadIncomplete,

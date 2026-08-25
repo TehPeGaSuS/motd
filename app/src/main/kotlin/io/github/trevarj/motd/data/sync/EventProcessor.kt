@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.sync
 
 import androidx.room.withTransaction
+import io.github.trevarj.motd.avatar.validateAvatarUrl
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.bouncer.redactBouncerServReply
 import io.github.trevarj.motd.data.db.BufferEntity
@@ -307,6 +308,7 @@ class EventProcessor
             isupport: Map<String, String>,
         ) {
             connectionGenerations[networkId] = db.connectionGenerationDao().next(networkId)
+            networkDao.setServerIconUrl(networkId, isupport["draft/ICON"]?.let(::validateAvatarUrl))
             val identity =
                 NetworkIdentityEntity(
                     networkId = networkId,

@@ -223,6 +223,11 @@ class PushInstanceCoordinatorTest {
 
         override suspend fun idsInOrder(): List<Long> = flow.value.map { it.id }
 
+        override suspend fun setServerIconUrl(
+            id: Long,
+            url: String?,
+        ) = Unit
+
         override suspend fun setOrdering(
             id: Long,
             ordering: Int,

@@ -62,6 +62,13 @@ class NetworkDedupTest {
                 .sortedWith(compareBy(NetworkEntity::ordering, NetworkEntity::id))
                 .map { it.id }
 
+        override suspend fun setServerIconUrl(
+            id: Long,
+            url: String?,
+        ) {
+            rows[id]?.let { rows[id] = it.copy(serverIconUrl = url) }
+        }
+
         override suspend fun setOrdering(
             id: Long,
             ordering: Int,

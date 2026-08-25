@@ -461,6 +461,20 @@ class EventProcessorTest {
         }
 
     @Test
+    fun registrationStoresOnlyValidHttpsNetworkIcons() =
+        runTest {
+            processor.onRegistered(
+                networkId,
+                "me",
+                mapOf("draft/ICON" to "https://example.org/icon-{size}.png"),
+            )
+            assertEquals("https://example.org/icon-{size}.png", db.networkDao().byId(networkId)?.serverIconUrl)
+
+            processor.onRegistered(networkId, "me", mapOf("draft/ICON" to "http://example.org/icon.png"))
+            assertNull(db.networkDao().byId(networkId)?.serverIconUrl)
+        }
+
+    @Test
     fun customChantypesRestoreAfterProcessDeathForPushRouting() =
         runTest {
             processor.onRegistered(
