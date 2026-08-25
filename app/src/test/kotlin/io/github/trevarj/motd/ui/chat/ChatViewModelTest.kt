@@ -3091,7 +3091,7 @@ class ChatViewModelTest {
             networkIdentityDao = db.networkIdentityDao(),
             messageDao = db.messageDao(),
             reactionDao = db.reactionDao(),
-            mediatorFactory = ChatHistoryMediatorFactory { error("paging is not exercised here") },
+            mediatorFactory = ChatHistoryMediatorFactory { _, _, _ -> error("paging is not exercised here") },
             historyGapDao = db.historyGapDao(),
         )
 

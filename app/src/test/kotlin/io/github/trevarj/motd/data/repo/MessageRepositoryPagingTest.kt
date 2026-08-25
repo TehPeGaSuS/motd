@@ -21,6 +21,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -57,7 +58,7 @@ class MessageRepositoryPagingTest {
             db.networkIdentityDao(),
             db.messageDao(),
             db.reactionDao(),
-            ChatHistoryMediatorFactory { _ -> error("paging is driven by the source directly here") },
+            ChatHistoryMediatorFactory { _, _, _ -> error("paging is driven by the source directly here") },
             db.historyGapDao(),
         )
 
@@ -72,19 +73,23 @@ class MessageRepositoryPagingTest {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
-    fun pagingAttachesMediatorWithCanonicalRoomId() =
+    fun pagingAttachesMediatorWithCanonicalRoomAndVisibilityContext() =
         runTest {
-            // Scroll-driven paging attaches the mediator unconditionally, so the first Paging collection
-            // builds it with the canonical room id resolved from the context.
+            // Mediator and PagingSource must use one coordinate space or hidden raw pages can be
+            // mistaken for visible paging progress.
             var mediatorRoomId: Long? = null
+            var mediatorVisibility: MessageVisibilitySpec? = null
+            var mediatorIdentityRules: IrcIdentityRules? = null
             val repository =
                 MessageRepositoryImpl(
                     db.bufferDao(),
                     db.networkIdentityDao(),
                     db.messageDao(),
                     db.reactionDao(),
-                    ChatHistoryMediatorFactory { roomId ->
+                    ChatHistoryMediatorFactory { roomId, visibility, identityRules ->
                         mediatorRoomId = roomId
+                        mediatorVisibility = visibility
+                        mediatorIdentityRules = identityRules
                         object : RemoteMediator<Int, MessageEntity>() {
                             override suspend fun load(
                                 loadType: LoadType,
@@ -95,9 +100,12 @@ class MessageRepositoryPagingTest {
                     db.historyGapDao(),
                 )
 
-            repository.messages(bufferId, MessageVisibilitySpec()).first()
+            val visibility = MessageVisibilitySpec(presenceMode = PresenceMode.HIDDEN)
+            repository.messages(bufferId, visibility).first()
 
             assertEquals(bufferId, mediatorRoomId)
+            assertEquals(visibility, mediatorVisibility)
+            assertEquals(IrcIdentityRules(), mediatorIdentityRules)
         }
 
     @Test

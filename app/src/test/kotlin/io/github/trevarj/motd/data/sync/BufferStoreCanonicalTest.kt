@@ -668,7 +668,7 @@ class BufferStoreCanonicalTest {
                     db.networkIdentityDao(),
                     db.messageDao(),
                     db.reactionDao(),
-                    ChatHistoryMediatorFactory { roomId ->
+                    ChatHistoryMediatorFactory { roomId, _, _ ->
                         mediatorRoomId = roomId
                         object : RemoteMediator<Int, MessageEntity>() {
                             override suspend fun load(

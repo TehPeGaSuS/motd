@@ -234,6 +234,19 @@ internal fun newestPresentedMessageQuery(
         arrayOf(bufferId),
     )
 
+/** Oldest row the same visibility-filtered PagingSource would present. */
+internal fun oldestPresentedMessageQuery(
+    bufferId: Long,
+    spec: MessageVisibilitySpec,
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
+): SimpleSQLiteQuery =
+    SimpleSQLiteQuery(
+        "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
+            "AND ${MessageVisibilitySql(spec, identityRules).timeline()} " +
+            "ORDER BY m.serverTime ASC, m.timelineOrder ASC, m.id ASC LIMIT 1",
+        arrayOf(bufferId),
+    )
+
 internal fun countTimelineNewerQuery(
     bufferId: Long,
     serverTime: Long,

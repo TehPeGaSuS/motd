@@ -271,7 +271,7 @@ class RecentPagingAppendReproTest {
             db.networkIdentityDao(),
             db.messageDao(),
             db.reactionDao(),
-            ChatHistoryMediatorFactory { roomId ->
+            ChatHistoryMediatorFactory { roomId, visibility, identityRules ->
                 ChatHistoryRemoteMediator(
                     roomId,
                     db.bufferDao(),
@@ -282,6 +282,8 @@ class RecentPagingAppendReproTest {
                     db.historyCursorDao(),
                     db.historyGapDao(),
                     loader,
+                    visibility = visibility,
+                    identityRules = identityRules,
                 )
             },
             db.historyGapDao(),

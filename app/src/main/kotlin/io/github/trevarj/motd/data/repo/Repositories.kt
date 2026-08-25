@@ -18,6 +18,7 @@ import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -259,11 +260,14 @@ interface MessageRepository {
     suspend fun deleteMessage(id: Long)
 }
 
-/** WP4 injects this to build its Pager; WP1 stub-binds a no-op (immediate endOfPagination),
- *  WP5 provides the real CHATHISTORY-backed implementation, WP10 rebinds. */
-@OptIn(androidx.paging.ExperimentalPagingApi::class) // RemoteMediator is experimental; annotation does not alter the frozen signature
+/** Builds the history mediator with the exact visibility coordinate space used by its Pager. */
+@OptIn(androidx.paging.ExperimentalPagingApi::class)
 fun interface ChatHistoryMediatorFactory {
-    fun create(bufferId: Long): RemoteMediator<Int, MessageEntity>
+    fun create(
+        bufferId: Long,
+        visibility: MessageVisibilitySpec,
+        identityRules: IrcIdentityRules,
+    ): RemoteMediator<Int, MessageEntity>
 }
 
 /** Local FTS results plus the honesty metadata the screen must disclose. */

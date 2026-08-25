@@ -88,21 +88,21 @@ class CatchUpWavePlanTest {
     }
 
     @Test
-    fun `overflow past the wave-one bound becomes the paced sweep in the same order`() {
+    fun `massive account keeps the visible wave bounded and the overflow ordered`() {
         val candidates =
-            (1..15).map { index ->
+            (1..10_000).map { index ->
                 CatchUpCandidate(
-                    target(index.toLong(), "#chan$index", latest = (100 - index).toLong()),
+                    target(index.toLong(), "#chan$index", latest = (10_001 - index).toLong()),
                     changed = true,
                 )
             }
 
-        val plan = planCatchUpWaves(candidates, foregroundBufferId = null, waveOneLimit = 4)
+        val plan = planCatchUpWaves(candidates, foregroundBufferId = null)
 
-        assertEquals(listOf("#chan1", "#chan2", "#chan3", "#chan4"), plan.waveOne.map { it.name })
-        assertEquals(11, plan.waveTwo.size)
-        assertEquals("#chan5", plan.waveTwo.first().name)
-        assertEquals("#chan15", plan.waveTwo.last().name)
+        assertEquals(WAVE_ONE_LIMIT, plan.waveOne.size)
+        assertEquals(10_000 - WAVE_ONE_LIMIT, plan.waveTwo.size)
+        assertEquals("#chan${WAVE_ONE_LIMIT + 1}", plan.waveTwo.first().name)
+        assertEquals("#chan10000", plan.waveTwo.last().name)
         assertEquals(emptyList<Long>(), plan.settledUnchanged)
     }
 

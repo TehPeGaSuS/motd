@@ -71,7 +71,7 @@ class MessageRepositoryImpl
                     // older history at the bottom of the timeline; interior seams belong to the gap
                     // fill coordinator. The canonical id comes from pagingContextFlow, so a durable
                     // redirect still paints and pages the winner room.
-                    remoteMediator = mediatorFactory.create(context.roomId),
+                    remoteMediator = mediatorFactory.create(context.roomId, visibility, context.identityRules),
                     pagingSourceFactory = {
                         messageDao.pagingSource(
                             messagePagingQuery(

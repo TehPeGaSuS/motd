@@ -120,11 +120,35 @@ class FreshInstallScrollbackTest {
             replyToMsgid = null,
         )
 
+    private fun joined(
+        msgid: String,
+        time: Long,
+        nick: String = "lurker",
+        isSelf: Boolean = false,
+    ) = IrcEvent.Joined(
+        ctx = MessageContext(msgid, time, null, "b", null),
+        nick = nick,
+        channel = "#chan",
+        account = null,
+        realname = null,
+        isSelf = isSelf,
+    )
+
+    private fun hiddenPage(index: Int): List<IrcEvent> {
+        val newest = 10_000 - ((index - 1) * 50) - 1
+        return ((newest - 49)..newest).map { joined("join-$it", it.toLong()) }
+    }
+
     private fun messages(events: List<IrcEvent>): ChatHistoryResponse.Messages {
         val refs =
             events
-                .mapNotNull { (it as? IrcEvent.ChatMessage)?.ctx }
-                .map { ChatHistoryReference(it.msgid, it.serverTime) }
+                .mapNotNull {
+                    when (it) {
+                        is IrcEvent.ChatMessage -> it.ctx
+                        is IrcEvent.Joined -> it.ctx
+                        else -> null
+                    }
+                }.map { ChatHistoryReference(it.msgid, it.serverTime) }
         return ChatHistoryResponse.Messages(
             events,
             oldest = refs.firstOrNull(),
@@ -133,6 +157,23 @@ class FreshInstallScrollbackTest {
             endOfHistory = false,
             primaryMessageCount = refs.size,
         )
+    }
+
+    /** Presence-heavy field shape: seven invisible pages before the first conversational row. */
+    private inner class PresenceFloodHistory : ChatHistoryRemoteMediator.HistorySource {
+        val requests = mutableListOf<ChatHistoryRequest>()
+        private val before =
+            ArrayDeque(
+                (1..7).map(::hiddenPage) +
+                    listOf(listOf(chatMsg(9_600)) + hiddenPage(8).drop(1)),
+            )
+
+        override suspend fun availability() = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), 100)
+
+        override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+            requests += req
+            return messages(if (req.subcommand == ChatHistoryRequest.Subcommand.BEFORE) before.removeFirstOrNull().orEmpty() else emptyList())
+        }
     }
 
     /** A soju-shaped server: timestamp-only references, no chathistory-end, [stored] rows of backlog. */
@@ -199,7 +240,7 @@ class FreshInstallScrollbackTest {
             db.networkIdentityDao(),
             db.messageDao(),
             db.reactionDao(),
-            ChatHistoryMediatorFactory { roomId ->
+            ChatHistoryMediatorFactory { roomId, visibility, identityRules ->
                 ChatHistoryRemoteMediator(
                     roomId,
                     db.bufferDao(),
@@ -210,6 +251,8 @@ class FreshInstallScrollbackTest {
                     db.historyCursorDao(),
                     db.historyGapDao(),
                     loader,
+                    visibility = visibility,
+                    identityRules = identityRules,
                 )
             },
             db.historyGapDao(),
@@ -296,6 +339,31 @@ class FreshInstallScrollbackTest {
         advanceUntilIdle()
         job.cancel()
     }
+
+    @Test
+    fun oneOpenCrossesFilteredPresenceFloodWithoutReopeningTheRoom() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                processor.process(networkId, joined("self-join", 10_000, nick = "me", isSelf = true))
+                val history = PresenceFloodHistory()
+
+                openAndScroll(repository(history), rounds = 1) { differ ->
+                    assertTrue(
+                        "conversation behind hidden presence pages was not presented",
+                        (0 until differ.itemCount).any { differ.peek(it)?.msgid == "row9600" },
+                    )
+                }
+
+                assertTrue(
+                    "one open did not walk the hidden-page quantum: ${history.requests}",
+                    history.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE } >=
+                        ChatHistoryRemoteMediator.PRESENTATION_PAGE_BUDGET,
+                )
+            } finally {
+                Dispatchers.resetMain()
+            }
+        }
 
     @Test
     fun freshRoomSeedsThenKeepsPagingOlderAsTheReaderScrolls() =

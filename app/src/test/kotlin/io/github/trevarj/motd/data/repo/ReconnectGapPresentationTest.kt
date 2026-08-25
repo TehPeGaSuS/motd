@@ -235,7 +235,7 @@ class ReconnectGapPresentationTest {
             db.networkIdentityDao(),
             db.messageDao(),
             db.reactionDao(),
-            ChatHistoryMediatorFactory { roomId ->
+            ChatHistoryMediatorFactory { roomId, visibility, identityRules ->
                 ChatHistoryRemoteMediator(
                     roomId,
                     db.bufferDao(),
@@ -245,6 +245,8 @@ class ReconnectGapPresentationTest {
                     50,
                     db.historyCursorDao(),
                     db.historyGapDao(),
+                    visibility = visibility,
+                    identityRules = identityRules,
                 )
             },
             db.historyGapDao(),

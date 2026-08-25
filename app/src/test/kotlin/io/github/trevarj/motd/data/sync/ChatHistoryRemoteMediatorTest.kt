@@ -17,6 +17,8 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.history.HistoryLadderStalled
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -88,6 +90,25 @@ class ChatHistoryRemoteMediatorTest {
         replyToMsgid = null,
     )
 
+    private fun joined(
+        msgid: String,
+        time: Long,
+        nick: String = "lurker",
+        isSelf: Boolean = false,
+    ) = IrcEvent.Joined(
+        ctx = MessageContext(msgid, time, null, "b", null),
+        nick = nick,
+        channel = "#chan",
+        account = null,
+        realname = null,
+        isSelf = isSelf,
+    )
+
+    private fun hiddenPage(index: Int): List<IrcEvent> {
+        val newest = 10_000 - ((index - 1) * 50) - 1
+        return ((newest - 49)..newest).map { joined("join-$it", it.toLong()) }
+    }
+
     private fun messages(
         events: List<IrcEvent>,
         endOfHistory: Boolean = false,
@@ -97,6 +118,7 @@ class ChatHistoryRemoteMediatorTest {
                 val ctx =
                     when (event) {
                         is IrcEvent.ChatMessage -> event.ctx
+                        is IrcEvent.Joined -> event.ctx
                         is IrcEvent.TagMessage -> event.ctx
                         else -> null
                     } ?: return@mapNotNull null
@@ -200,8 +222,41 @@ class ChatHistoryRemoteMediatorTest {
             .pagingSource(bufferId)
             .load(
                 androidx.paging.PagingSource.LoadParams
-                    .Refresh(null, 100, false),
+                    .Refresh(null, 1_000, false),
             ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data.size }
+
+    private suspend fun presentedRows(): List<MessageEntity> =
+        db
+            .messageDao()
+            .pagingSource(messagePagingQuery(bufferId, MessageVisibilitySpec()))
+            .load(
+                androidx.paging.PagingSource.LoadParams
+                    .Refresh(null, 1_000, false),
+            ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
+
+    @Test
+    fun hiddenPresenceBudgetOffersRetryAndResumesFromTheAdvancedBoundary() =
+        runTest {
+            processor.process(networkId, joined("self-join", 10_000, nick = "me", isSelf = true))
+            val pages = (1..8).map(::hiddenPage) + listOf(listOf(chatMsg("visible-after-retry", 9_599)))
+            val history =
+                FakeHistory(
+                    before = ArrayDeque(pages),
+                    referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
+                )
+            val mediator = mediator(history)
+
+            val first = load(mediator, LoadType.APPEND)
+            val eighthBoundary = history.requests.last().bound1
+            val retried = load(mediator, LoadType.APPEND)
+
+            assertTrue(first is RemoteMediator.MediatorResult.Error)
+            assertTrue((first as RemoteMediator.MediatorResult.Error).throwable is HistoryLadderStalled)
+            assertTrue(retried is RemoteMediator.MediatorResult.Success)
+            assertEquals(9, history.calls.count { it == ChatHistoryRequest.Subcommand.BEFORE })
+            assertTrue(history.requests.last().bound1 != eighthBoundary)
+            assertTrue(presentedRows().any { it.msgid == "visible-after-retry" })
+        }
 
     @Test
     fun appendOnEmptyBuffer_seedsLatest() =

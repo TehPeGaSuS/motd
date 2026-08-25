@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.db.HistoryGapDao
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.data.history.PageProgress
@@ -19,6 +20,8 @@ import io.github.trevarj.motd.data.history.Pageability
 import io.github.trevarj.motd.data.history.olderPageability
 import io.github.trevarj.motd.data.history.openGapFloor
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.visibility.oldestPresentedMessageQuery
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -27,6 +30,7 @@ import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.irc.event.historyEventMetadataOrNull
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
@@ -52,7 +56,9 @@ import javax.inject.Singleton
  * (history complete), never merely because the loader had to stop at one ambiguous equal-timestamp
  * page edge, and never for a page that simply made no progress: that stop is retryable and is
  * reported as [io.github.trevarj.motd.data.history.HistoryLadderStalled] so the timeline can offer
- * the reader the fetch. See [appendResult].
+ * the reader the fetch. APPEND also walks across a bounded run of pages that persist only rows hidden
+ * by the Pager's visibility policy; raw inserts do not count as progress until the presented oldest
+ * boundary moves. See [appendResult].
  *
  * Every entry uses SKIP_INITIAL_REFRESH so the cached DB paints without network I/O; Paging3 then
  * drives REFRESH (empty-store LATEST seed, otherwise no-op) and scroll-triggered APPEND for older
@@ -75,6 +81,10 @@ class ChatHistoryRemoteMediator(
     // counts, timestamps, and msgid PRESENCE only — never message content or msgid values. This is
     // the observability that identified the unrecoverable-gap append stall on timestamp-only wires.
     private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
+    // Exact coordinate space of the PagingSource this mediator feeds. Production always supplies both;
+    // defaults retain concise direct construction in tests whose rows are all visible.
+    private val visibility: MessageVisibilitySpec = MessageVisibilitySpec(),
+    private val identityRules: IrcIdentityRules = IrcIdentityRules(),
 ) : RemoteMediator<Int, MessageEntity>() {
     /**
      * Minimal seam over the live [io.github.trevarj.motd.irc.client.IrcClient] (mirrors
@@ -124,12 +134,7 @@ class ChatHistoryRemoteMediator(
                 }
 
                 LoadType.APPEND -> {
-                    append(
-                        networkId,
-                        buffer.id,
-                        buffer.ircTarget,
-                        buffer.historyComplete,
-                    )
+                    append(networkId, buffer.id, buffer.ircTarget)
                 }
             }.also { result ->
                 diagnostics.record("chat_history", "mediator_load_result") {
@@ -144,10 +149,6 @@ class ChatHistoryRemoteMediator(
 
                                 is MediatorResult.Error -> {
                                     "error"
-                                }
-
-                                else -> {
-                                    "unknown"
                                 }
                             },
                         "error_class" to
@@ -212,59 +213,76 @@ class ChatHistoryRemoteMediator(
         networkId: Long,
         roomId: Long,
         target: String,
-        historyComplete: Boolean,
     ): MediatorResult {
-        val gaps = historyGapDao?.forRoom(roomId).orEmpty()
-        val cursor = historyCursorDao?.byRoom(roomId)
-        val pageability =
-            olderPageability(
-                focusedGap = null,
-                historyComplete = historyComplete,
-                cursorOldest = cursor?.let { ChatHistoryReference(it.oldestMsgid, it.oldestServerTime) },
-                oldestLocalRow =
-                    messageDao
-                        .oldestBoundary(roomId)
-                        ?.let { ChatHistoryReference(it.msgid, it.serverTime) },
-                progress = null,
-                gapFloor = appendGapFloor(gaps),
-            )
-        return when (pageability) {
-            is Pageability.End -> {
-                endLoad(LoadType.APPEND, pageability.reason)
-            }
+        val presentedBefore = oldestPresentedAnchor(roomId)
+        var pagesLoaded = 0
+        while (true) {
+            val gaps = historyGapDao?.forRoom(roomId).orEmpty()
+            val cursor = historyCursorDao?.byRoom(roomId)
+            val pageability =
+                olderPageability(
+                    focusedGap = null,
+                    historyComplete = bufferDao.observeById(roomId)?.historyComplete == true,
+                    cursorOldest = cursor?.let { ChatHistoryReference(it.oldestMsgid, it.oldestServerTime) },
+                    oldestLocalRow =
+                        messageDao
+                            .oldestBoundary(roomId)
+                            ?.let { ChatHistoryReference(it.msgid, it.serverTime) },
+                    progress = null,
+                    gapFloor = appendGapFloor(gaps),
+                )
+            val page =
+                when (pageability) {
+                    is Pageability.End -> {
+                        return endLoad(LoadType.APPEND, pageability.reason)
+                    }
 
-            Pageability.SeedLatest -> {
-                recordAppendBoundary(roomId, gaps, cursor, boundary = null)
-                // Empty local store hit the end boundary on first open. With SKIP_INITIAL_REFRESH the
-                // REFRESH backfill never fires, so seed the newest page here via LATEST. If the server
-                // has history the inserted rows re-run the PagingSource; a later APPEND pages older.
-                loader
-                    .loadPage(
-                        networkId,
-                        roomId,
-                        target,
-                        HistoryPageLoader.Direction.LATEST,
-                        history,
-                        pageSize,
-                    ).appendResult(roomId, previous = null)
-            }
+                    Pageability.SeedLatest -> {
+                        recordAppendBoundary(roomId, gaps, cursor, boundary = null)
+                        // Empty local store hit the end boundary on first open. With
+                        // SKIP_INITIAL_REFRESH the REFRESH backfill never fires, so seed via LATEST.
+                        loader.loadPage(
+                            networkId,
+                            roomId,
+                            target,
+                            HistoryPageLoader.Direction.LATEST,
+                            history,
+                            pageSize,
+                        ) to null
+                    }
 
-            is Pageability.Page -> {
-                recordAppendBoundary(roomId, gaps, cursor, pageability.boundary)
-                loader
-                    .loadPage(
-                        networkId,
-                        roomId,
-                        target,
-                        HistoryPageLoader.Direction.OLDER,
-                        history,
-                        pageSize,
-                        gapId = pageability.focusedGapId,
-                        boundary = pageability.boundary,
-                    ).appendResult(roomId, previous = pageability.boundary)
-            }
+                    is Pageability.Page -> {
+                        recordAppendBoundary(roomId, gaps, cursor, pageability.boundary)
+                        loader.loadPage(
+                            networkId,
+                            roomId,
+                            target,
+                            HistoryPageLoader.Direction.OLDER,
+                            history,
+                            pageSize,
+                            gapId = pageability.focusedGapId,
+                            boundary = pageability.boundary,
+                        ) to pageability.boundary
+                    }
+                }
+            pagesLoaded++
+            val result = page.first.appendResult(roomId, page.second)
+            if (result !is MediatorResult.Success || result.endOfPaginationReached) return result
+
+            // Paging demand is expressed in the filtered list, not in raw Room rows. A full page of
+            // hidden JOIN/QUIT events can advance every protocol cursor while adding no item for
+            // Paging to request past. Keep walking until the exact presented oldest boundary moves.
+            if (oldestPresentedAnchor(roomId).advancedOlderThan(presentedBefore)) return result
+            if (pagesLoaded >= PRESENTATION_PAGE_BUDGET) return MediatorResult.Error(HistoryLadderStalled())
         }
     }
+
+    private suspend fun oldestPresentedAnchor(roomId: Long): TimelineAnchor? =
+        messageDao
+            .rawMessage(oldestPresentedMessageQuery(roomId, visibility, identityRules))
+            ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
+
+    private fun TimelineAnchor?.advancedOlderThan(previous: TimelineAnchor?): Boolean = this != null && (previous == null || this < previous)
 
     /**
      * The floor that keeps this APPEND out of the coordinator's territory, or null when it has none.
@@ -422,6 +440,11 @@ class ChatHistoryRemoteMediator(
                 MediatorResult.Error(cause)
             }
         }
+
+    internal companion object {
+        /** Maximum hidden history quantum before control returns as an explicit reader retry. */
+        internal const val PRESENTATION_PAGE_BUDGET = 8
+    }
 }
 
 /** Enforce the client-requested primary bound even when a server over-delivers a batch. */
@@ -521,8 +544,7 @@ internal fun ChatHistoryResponse.Messages.boundedToRequest(
 }
 
 /**
- * Real mediator factory wired into [io.github.trevarj.motd.data.repo.MessageRepositoryImpl] via
- * the frozen [ChatHistoryMediatorFactory] contract; WP10 rebinds this over the WP1 no-op stub.
+ * Real mediator factory wired into [io.github.trevarj.motd.data.repo.MessageRepositoryImpl].
  */
 @OptIn(ExperimentalPagingApi::class)
 @Singleton
@@ -538,7 +560,11 @@ class ChatHistoryMediatorFactoryImpl
         private val historyGapDao: HistoryGapDao,
         private val diagnostics: DiagnosticLogger,
     ) : ChatHistoryMediatorFactory {
-        override fun create(bufferId: Long): RemoteMediator<Int, MessageEntity> =
+        override fun create(
+            bufferId: Long,
+            visibility: MessageVisibilitySpec,
+            identityRules: IrcIdentityRules,
+        ): RemoteMediator<Int, MessageEntity> =
             ChatHistoryRemoteMediator(
                 bufferId,
                 bufferDao,
@@ -549,6 +575,8 @@ class ChatHistoryMediatorFactoryImpl
                 historyGapDao = historyGapDao,
                 loader = loader,
                 diagnostics = diagnostics,
+                visibility = visibility,
+                identityRules = identityRules,
             )
 
         // Resolve the live client lazily per call: the buffer can open before its network reaches
