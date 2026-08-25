@@ -437,6 +437,8 @@ private fun DrawerNetworkItem(
                                 R.string.drawer_state_disconnected
                             },
                         )
+                    val iconUrl = expandAvatarUrl(row.iconUrl.orEmpty(), 64)
+                    var iconLoaded by remember(iconUrl) { mutableStateOf(false) }
                     Box(
                         modifier =
                             Modifier
@@ -445,23 +447,28 @@ private fun DrawerNetworkItem(
                                 .semantics { stateDescription = statusDescription },
                         contentAlignment = Alignment.Center,
                     ) {
-                        IrcNetworkBadge(
-                            name = row.name,
-                            networkId = row.networkId,
-                            status =
-                                if (connected) {
-                                    LocalMotdSemanticColors.current.success
-                                } else {
-                                    MaterialTheme.colorScheme.outlineVariant
-                                },
-                            size = 32.dp,
-                        )
-                        expandAvatarUrl(row.iconUrl.orEmpty(), 64)?.let { url ->
+                        if (!iconLoaded) {
+                            IrcNetworkBadge(
+                                name = row.name,
+                                networkId = row.networkId,
+                                status =
+                                    if (connected) {
+                                        LocalMotdSemanticColors.current.success
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant
+                                    },
+                                size = 32.dp,
+                            )
+                        }
+                        iconUrl?.let { url ->
                             AsyncImage(
                                 model = url,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier.size(28.dp).clip(CircleShape),
+                                onLoading = { iconLoaded = false },
+                                onSuccess = { iconLoaded = true },
+                                onError = { iconLoaded = false },
+                                modifier = Modifier.size(32.dp).clip(CircleShape),
                             )
                         }
                     }
