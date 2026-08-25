@@ -111,7 +111,7 @@ class NetworkGuidanceUiTest {
         compose.onNodeWithText("official /auth flow", substring = true).assertExists()
 
         compose.runOnIdle { presetId = NetworkPresetId.UNDERNET }
-        compose.onNodeWithText("Server password", substring = true).assertExists()
+        compose.onNodeWithText("Server password (optional)").assertExists()
         compose.onNodeWithText("+x! username password", substring = true).assertExists()
 
         compose.runOnIdle { presetId = NetworkPresetId.CUSTOM }
