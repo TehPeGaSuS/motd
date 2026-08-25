@@ -51,6 +51,7 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.FormatBold
@@ -483,9 +484,23 @@ fun Composer(
         }
     }
 
-    fun publishDocument(next: IrcEditorDocument) {
+    fun publishDocument(
+        next: IrcEditorDocument,
+        selection: TextRange = editorValue.selection,
+    ) {
+        val boundedSelection =
+            TextRange(
+                selection.start.coerceIn(0, next.text.length),
+                selection.end.coerceIn(0, next.text.length),
+            )
         editorDocument = next
-        val raw = next.toRawValue(editorValue.selection.start, editorValue.selection.end)
+        if (next.text != editorValue.text) {
+            textFieldState.edit {
+                replace(0, length, next.text)
+                this.selection = boundedSelection
+            }
+        }
+        val raw = next.toRawValue(boundedSelection.start, boundedSelection.end)
         lastEmittedRaw = raw.text
         latestOnValueChange(TextFieldValue(raw.text, TextRange(raw.selectionStart, raw.selectionEnd)))
     }
@@ -730,6 +745,11 @@ fun Composer(
                         onColor = ::openColorSheet,
                         onClear = { currentDocument, selection ->
                             publishDocument(currentDocument.clearFormatting(selection.start, selection.end))
+                        },
+                        onMarkdown = { currentDocument, range ->
+                            val next = currentDocument.formatMarkdown(range.start, range.end)
+                            val caret = range.end + next.text.length - currentDocument.text.length
+                            publishDocument(next, TextRange(caret))
                         },
                         onUploadDraft =
                             onUploadDraft?.takeIf { ircFormattingEnabled }?.let { upload ->
@@ -997,6 +1017,7 @@ private fun ComposerToolsToolbar(
     onToggle: (IrcEditorDocument, TextRange, IrcTextStyle) -> Unit,
     onColor: (IrcEditorDocument, TextRange) -> Unit,
     onClear: (IrcEditorDocument, TextRange) -> Unit,
+    onMarkdown: (IrcEditorDocument, TextRange) -> Unit,
     onUploadDraft: (() -> Unit)?,
 ) {
     val allowed = messageFormattingRange(value.text)
@@ -1109,7 +1130,7 @@ private fun ComposerToolsToolbar(
                 currentSelection.value?.let { onClear(currentDocument.value, it) }
             }
         }
-        onUploadDraft?.let { upload ->
+        if (showFormatting || onUploadDraft != null) {
             Box {
                 IconButton(
                     onClick = { overflowExpanded = true },
@@ -1121,15 +1142,31 @@ private fun ComposerToolsToolbar(
                     expanded = overflowExpanded,
                     onDismissRequest = { overflowExpanded = false },
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Upload current draft") },
-                        onClick = {
-                            overflowExpanded = false
-                            upload()
-                        },
-                        modifier = Modifier.testTag("chat_composer_upload_draft"),
-                        leadingIcon = { Icon(Icons.Outlined.AttachFile, contentDescription = null) },
-                    )
+                    if (showFormatting) {
+                        DropdownMenuItem(
+                            text = { Text("Format Markdown") },
+                            onClick = {
+                                overflowExpanded = false
+                                if (allowed != null && allowedEnd != null) {
+                                    onMarkdown(currentDocument.value, TextRange(allowed.first, allowedEnd))
+                                }
+                            },
+                            enabled = allowed != null,
+                            modifier = Modifier.testTag("chat_format_markdown"),
+                            leadingIcon = { Icon(Icons.Filled.AutoFixHigh, contentDescription = null) },
+                        )
+                    }
+                    onUploadDraft?.let { upload ->
+                        DropdownMenuItem(
+                            text = { Text("Upload current draft") },
+                            onClick = {
+                                overflowExpanded = false
+                                upload()
+                            },
+                            modifier = Modifier.testTag("chat_composer_upload_draft"),
+                            leadingIcon = { Icon(Icons.Outlined.AttachFile, contentDescription = null) },
+                        )
+                    }
                 }
             }
         }

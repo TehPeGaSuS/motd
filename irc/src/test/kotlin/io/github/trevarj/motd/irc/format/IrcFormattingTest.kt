@@ -146,6 +146,25 @@ class IrcFormattingTest {
     }
 
     @Test
+    fun markdownAndColorTokensBecomeIrcFormatting() {
+        val raw =
+            markdownToIrcFormatting(
+                "**bold** _italic_ __under__ ~~strike~~ `code` \$cred,lightgreencolor\$c \\**plain\\**",
+            )
+        val parsed = parseIrcFormatting(raw)
+
+        assertEquals("bold italic under strike code color **plain**", parsed.visibleText)
+        assertTrue(parsed.stateAtVisible(0).bold)
+        assertTrue(parsed.stateAtVisible(5).italic)
+        assertTrue(parsed.stateAtVisible(12).underline)
+        assertTrue(parsed.stateAtVisible(18).strikethrough)
+        assertTrue(parsed.stateAtVisible(25).monospace)
+        assertEquals(IrcColor.Numeric(4), parsed.stateAtVisible(30).foreground)
+        assertEquals(IrcColor.Numeric(9), parsed.stateAtVisible(30).background)
+        assertTrue(parsed.stateAtVisible(parsed.visibleText.lastIndex).isDefault)
+    }
+
+    @Test
     fun splitComponentsFitAndRenderIndependently() {
         val raw = "$IRC_BOLD" + "hello world" + IRC_BOLD
         val components = splitIrcFormattedUtf8(raw, 9)

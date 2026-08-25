@@ -571,3 +571,171 @@ fun isIrcStyleSelected(
 }
 
 fun plainIrcText(raw: String): String = parseIrcFormatting(raw).visibleText
+
+/** Convert supported composer Markdown and Halloy-style `$` tokens to IRC controls. */
+fun markdownToIrcFormatting(text: String): String =
+    buildString(text.length) {
+        appendMarkdownIrc(text, 0, text.length)
+    }
+
+private fun StringBuilder.appendMarkdownIrc(
+    text: String,
+    start: Int,
+    end: Int,
+) {
+    var index = start
+    while (index < end) {
+        if (text[index] == '\\' && index + 1 < end && text[index + 1] in MARKDOWN_ESCAPES) {
+            append(text[index + 1])
+            index += 2
+            continue
+        }
+        val delimiter = MARKDOWN_DELIMITERS.firstOrNull { text.startsWith(it.token, index) }
+        if (delimiter != null && delimiter.canOpen(text, index, end)) {
+            val close = delimiter.closingIndex(text, index + delimiter.token.length, end)
+            if (close >= 0) {
+                append(delimiter.control)
+                if (delimiter.token == "`") {
+                    append(text, index + 1, close)
+                } else {
+                    appendMarkdownIrc(text, index + delimiter.token.length, close)
+                }
+                append(delimiter.control)
+                index = close + delimiter.token.length
+                continue
+            }
+        }
+        if (text[index] == '$') {
+            val token = dollarFormatToken(text, index, end)
+            if (token != null) {
+                append(token.control)
+                index = token.end
+                continue
+            }
+        }
+        append(text[index++])
+    }
+}
+
+private data class MarkdownDelimiter(
+    val token: String,
+    val control: Char,
+) {
+    fun canOpen(
+        text: String,
+        index: Int,
+        end: Int,
+    ): Boolean {
+        val contentStart = index + token.length
+        if (contentStart >= end || text[contentStart].isWhitespace()) return false
+        return token.first() != '_' || index == 0 || !text[index - 1].isLetterOrDigit()
+    }
+
+    fun closingIndex(
+        text: String,
+        start: Int,
+        end: Int,
+    ): Int {
+        var index = start
+        while (index + token.length <= end) {
+            if (text[index] == '\\') {
+                index += 2
+                continue
+            }
+            if (text.startsWith(token, index) && !text[index - 1].isWhitespace()) {
+                val after = index + token.length
+                if (token.first() != '_' || after == end || !text[after].isLetterOrDigit()) return index
+            }
+            index++
+        }
+        return -1
+    }
+}
+
+private data class DollarFormatToken(
+    val control: String,
+    val end: Int,
+)
+
+private fun dollarFormatToken(
+    text: String,
+    start: Int,
+    end: Int,
+): DollarFormatToken? {
+    if (start + 2 > end) return null
+    val simple =
+        when (text.substring(start, start + 2)) {
+            "\$b" -> IRC_BOLD
+            "\$i" -> IRC_ITALIC
+            "\$m" -> IRC_MONOSPACE
+            "\$s" -> IRC_STRIKETHROUGH
+            "\$u" -> IRC_UNDERLINE
+            "\$r" -> IRC_RESET
+            else -> null
+        }
+    if (simple != null) return DollarFormatToken(simple.toString(), start + 2)
+    if (!text.startsWith("\$c", start)) return null
+
+    var cursor = start + 2
+    val foreground =
+        parseMarkdownColor(text, cursor, end)
+            ?: return DollarFormatToken(IRC_COLOR.toString(), cursor)
+    cursor = foreground.second
+    val background =
+        if (cursor < end && text[cursor] == ',') {
+            parseMarkdownColor(text, cursor + 1, end)?.also { cursor = it.second }?.first
+        } else {
+            null
+        }
+    return DollarFormatToken(numericColorControl(foreground.first, background), cursor)
+}
+
+private fun parseMarkdownColor(
+    text: String,
+    start: Int,
+    end: Int,
+): Pair<Int, Int>? {
+    var digitEnd = start
+    while (digitEnd < end && text[digitEnd].isDigit() && digitEnd - start < 2) digitEnd++
+    if (digitEnd > start) {
+        return text
+            .substring(start, digitEnd)
+            .toInt()
+            .takeIf { it in 0..98 }
+            ?.let { it to digitEnd }
+    }
+    return MARKDOWN_COLOR_NAMES
+        .firstNotNullOfOrNull { (name, code) ->
+            (code to start + name.length)
+                .takeIf { start + name.length <= end && text.startsWith(name, start) }
+        }
+}
+
+private val MARKDOWN_DELIMITERS =
+    listOf(
+        MarkdownDelimiter("**", IRC_BOLD),
+        MarkdownDelimiter("__", IRC_UNDERLINE),
+        MarkdownDelimiter("~~", IRC_STRIKETHROUGH),
+        MarkdownDelimiter("`", IRC_MONOSPACE),
+        MarkdownDelimiter("_", IRC_ITALIC),
+    )
+private val MARKDOWN_ESCAPES = setOf('\\', '*', '_', '~', '`', '$')
+private val MARKDOWN_COLOR_NAMES =
+    listOf(
+        "lightgreen" to 9,
+        "lightcyan" to 11,
+        "lightblue" to 12,
+        "lightgrey" to 15,
+        "white" to 0,
+        "black" to 1,
+        "blue" to 2,
+        "green" to 3,
+        "red" to 4,
+        "brown" to 5,
+        "magenta" to 6,
+        "orange" to 7,
+        "yellow" to 8,
+        "cyan" to 10,
+        "pink" to 13,
+        "grey" to 14,
+    )

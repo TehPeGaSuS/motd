@@ -103,6 +103,22 @@ data class IrcEditorDocument(
         return replaceStates(start, end) { IrcFormatState() }
     }
 
+    /** Replace Markdown delimiters in one visible range while preserving existing IRC styling. */
+    fun formatMarkdown(
+        selectionStart: Int,
+        selectionEnd: Int,
+    ): IrcEditorDocument {
+        val start = minOf(selectionStart, selectionEnd).coerceIn(0, text.length)
+        val end = maxOf(selectionStart, selectionEnd).coerceIn(start, text.length)
+        if (start == end) return this
+        val selectedRaw = serializeVisibleIrc(text.substring(start, end), states.subList(start, end))
+        val formatted = fromRaw(markdownToIrcFormatting(selectedRaw)).first
+        return copy(
+            text = text.substring(0, start) + formatted.text + text.substring(end),
+            states = states.subList(0, start) + formatted.states + states.subList(end, text.length),
+        )
+    }
+
     fun isStyleSelected(
         selectionStart: Int,
         selectionEnd: Int,

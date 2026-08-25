@@ -340,6 +340,35 @@ class ComposerEditorStateTest {
     }
 
     @Test
+    fun markdownFormattingIsExplicitAndUpdatesTheVisibleEditor() {
+        val source = "/msg alice **bold** and _italic_"
+        val draft = mutableStateOf(TextFieldValue(source, TextRange(source.length)))
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.runOnIdle { assertEquals(source, draft.value.text) }
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_overflow").performScrollTo().performClick()
+        compose.onNodeWithTag("chat_format_markdown").performClick()
+
+        compose.runOnIdle {
+            val parsed = parseIrcFormatting(draft.value.text)
+            assertEquals("/msg alice bold and italic", parsed.visibleText)
+            assertTrue(parsed.stateAtVisible(11).bold)
+            assertTrue(parsed.stateAtVisible(parsed.visibleText.lastIndex).italic)
+        }
+    }
+
+    @Test
     fun clearingFormattingNeverDeletesSelectedText() {
         val raw = "$IRC_BOLD${IRC_COLOR}04,01hello\nthere$IRC_RESET"
         val draft = mutableStateOf(TextFieldValue(raw, TextRange(0, raw.length)))
