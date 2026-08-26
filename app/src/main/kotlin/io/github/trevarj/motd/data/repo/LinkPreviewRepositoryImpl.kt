@@ -598,9 +598,13 @@ class LinkPreviewRepositoryImpl
                     ?.takeIf { it.isNotEmpty() }
             }
 
-            private val NUMERIC_ENTITY = Regex("&#(x[0-9a-fA-F]+|[0-9]+);")
+            private val HTML_ENTITY = Regex("&(?:#(?:[xX][0-9a-fA-F]+|[0-9]+)|[a-z]+);")
             private val NAMED_ENTITIES =
                 mapOf(
+                    "amp" to "&",
+                    "lt" to "<",
+                    "gt" to ">",
+                    "quot" to "\"",
                     "nbsp" to " ",
                     "ndash" to "–",
                     "mdash" to "—",
@@ -611,37 +615,26 @@ class LinkPreviewRepositoryImpl
                     "ldquo" to "“",
                 )
 
-            // HTML entity decode for OG/title text: the handful of literal entities common in hand-
-            // written markup, plus numeric character references (decimal and hex) that CMS-rendered
-            // pages routinely emit for punctuation like en/em dashes. sanitizeText still runs after
-            // this and strips any CONTROL/FORMAT code points a malicious numeric reference decodes to.
+            // Decode one entity layer only; leave unknown, malformed, and surrogate references intact.
             private fun decodeEntities(s: String): String =
-                s
-                    .replace("&amp;", "&")
-                    .replace("&lt;", "<")
-                    .replace("&gt;", ">")
-                    .replace("&quot;", "\"")
-                    .replace("&#39;", "'")
-                    .replace("&#x27;", "'")
-                    .let { withNamed ->
-                        NAMED_ENTITIES.entries.fold(withNamed) { acc, (name, value) ->
-                            acc.replace("&$name;", value)
-                        }
-                    }.let { withNumeric ->
-                        NUMERIC_ENTITY.replace(withNumeric) { match ->
-                            val ref = match.groupValues[1]
-                            val codePoint =
-                                if (ref.startsWith("x", ignoreCase = true)) {
-                                    ref.drop(1).toIntOrNull(16)
-                                } else {
-                                    ref.toIntOrNull()
-                                }
-                            codePoint
-                                ?.takeIf(Character::isValidCodePoint)
-                                ?.let { String(Character.toChars(it)) }
-                                ?: match.value
-                        }
+                HTML_ENTITY.replace(s) { match ->
+                    val ref = match.value.substring(1, match.value.lastIndex)
+                    if (!ref.startsWith('#')) {
+                        NAMED_ENTITIES[ref] ?: match.value
+                    } else {
+                        val number = ref.drop(1)
+                        val codePoint =
+                            if (number.startsWith("x", ignoreCase = true)) {
+                                number.drop(1).toIntOrNull(16)
+                            } else {
+                                number.toIntOrNull()
+                            }
+                        codePoint
+                            ?.takeIf { Character.isValidCodePoint(it) && it !in 0xD800..0xDFFF }
+                            ?.let { String(Character.toChars(it)) }
+                            ?: match.value
                     }
+                }
 
             internal fun isPopularVideoUrl(url: String): Boolean =
                 runCatching {
