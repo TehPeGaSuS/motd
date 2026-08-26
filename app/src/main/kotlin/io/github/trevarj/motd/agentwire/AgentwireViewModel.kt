@@ -47,6 +47,28 @@ import javax.inject.Inject
 private const val AGENTWIRE_INITIAL_HISTORY_SIZE = 20
 private const val AGENTWIRE_HISTORY_PAGE_SIZE = 50
 
+/**
+ * Directories of a freshly arrived workspace page that the browser should open: the ones the user
+ * had expanded, or every root until the user has expanded anything. Directories whose sessions are
+ * already loaded are skipped so a repeated page does not re-request the same tree.
+ */
+internal fun agentwireDirectoriesToReopen(
+    state: AgentwireUiState,
+    parent: String?,
+): List<AgentwireListItem> {
+    val autoOpenRoots = parent == null && state.expandedDirectories.isEmpty()
+    return state.workspaceChildren[parent.orEmpty()].orEmpty().filter { directory ->
+        (autoOpenRoots || directory.id in state.expandedDirectories) &&
+            directory.id !in state.loadedSessionDirectories
+    }
+}
+
+/** Expanding a directory only costs a round trip while its children or sessions are missing. */
+internal fun agentwireExpansionNeedsLoad(
+    state: AgentwireUiState,
+    path: String,
+): Boolean = path !in state.workspaceChildren || path !in state.loadedSessionDirectories
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class AgentwireViewModel
@@ -286,6 +308,7 @@ class AgentwireViewModel
                 },
         )
 
+        /** Drops the cached tree and reloads it; expanded directories reopen as their pages arrive. */
         fun refreshSessionBrowser() {
             _state.update {
                 it.copy(
@@ -299,10 +322,24 @@ class AgentwireViewModel
             listSessions(live = true)
         }
 
+        fun toggleWorkspaceExpansion(
+            path: String,
+            hasChildren: Boolean = true,
+        ) {
+            if (path in _state.value.expandedDirectories) {
+                _state.update { it.copy(expandedDirectories = it.expandedDirectories - path) }
+            } else if (agentwireExpansionNeedsLoad(_state.value, path)) {
+                expandWorkspace(path, hasChildren)
+            } else {
+                _state.update { it.copy(expandedDirectories = it.expandedDirectories + path) }
+            }
+        }
+
         fun expandWorkspace(
             path: String,
             hasChildren: Boolean = true,
         ) {
+            _state.update { it.copy(expandedDirectories = it.expandedDirectories + path) }
             if (hasChildren) listWorkspaces(path)
             listSessions(path, live = false)
         }
@@ -612,6 +649,11 @@ class AgentwireViewModel
                 } else {
                     result.state
                 }
+            if (envelope.kind == "workspace.page") {
+                agentwireDirectoriesToReopen(_state.value, envelope.data?.string("parent")).forEach {
+                    expandWorkspace(it.id, it.raw.bool("hasChildren") ?: true)
+                }
+            }
             if (envelope.kind == "session.page") {
                 val next = envelope.data?.string("next")
                 if (next != null) {

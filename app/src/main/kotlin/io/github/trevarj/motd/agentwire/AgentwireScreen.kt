@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -63,6 +64,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -98,6 +100,7 @@ import io.github.trevarj.motd.ui.chat.shouldShowNewestFab
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -139,29 +142,40 @@ private enum class AgentwireSheet { STATUS, QUEUE, QUESTION }
 
 private enum class AgentwireStatusTab { BROWSE, SETTINGS }
 
-private data class AgentwireWorkspaceRow(
+private const val AGENTWIRE_SEARCH_DEBOUNCE_MS = 300L
+
+internal data class AgentwireWorkspaceRow(
     val item: AgentwireListItem,
     val depth: Int,
     val treeKey: String,
+    /** False when the bridge said the directory has no child directories: render a leaf marker. */
+    val hasChildren: Boolean = true,
+    val expanded: Boolean = false,
+    /** Loaded session count when known, else the bridge's cheap `sessionCount` hint. */
+    val sessionCount: Int? = null,
 )
 
-internal fun agentwireSessionRuntimeStatus(session: AgentwireListItem): String? {
-    if (session.raw.bool("busy") != true) return null
-    return if (session.raw.stringList("flags").any { it.startsWith("waiting", ignoreCase = true) }) {
-        "Waiting"
-    } else {
-        "Running"
-    }
+/**
+ * Busy/waiting label for one session. The pushed status registry is newer than any `session.page`
+ * snapshot, so it wins whenever an entry exists for the session.
+ */
+internal fun agentwireSessionRuntimeStatus(
+    session: AgentwireListItem,
+    status: AgentwireSessionStatus? = null,
+): String? {
+    val busy = status?.busy ?: session.raw.bool("busy") ?: false
+    if (!busy) return null
+    val flags = status?.flags ?: session.raw.stringList("flags")
+    return if (flags.any { it.startsWith("waiting", ignoreCase = true) }) "Waiting" else "Running"
 }
 
-private fun workspaceRows(
+internal fun workspaceRows(
     children: Map<String, List<AgentwireListItem>>,
-    expanded: Map<String, Boolean>,
-    sessions: List<AgentwireListItem>,
-    query: String,
+    expanded: Set<String>,
+    sessions: Map<String, List<AgentwireListItem>>,
+    loadedSessionDirectories: Set<String> = emptySet(),
+    query: String = "",
 ): List<AgentwireWorkspaceRow> {
-    val roots = children[""].orEmpty().mapTo(HashSet(), AgentwireListItem::id)
-
     fun visit(
         parent: String,
         depth: Int,
@@ -171,20 +185,38 @@ private fun workspaceRows(
         buildList {
             children[parent].orEmpty().forEach { directory ->
                 val treeKey = "$branch>${directory.id}"
-                val isExpanded = query.isNotBlank() || (expanded[directory.id] ?: (directory.id in roots))
+                val hasChildren = directory.raw.bool("hasChildren") ?: true
+                val isExpanded = directory.id in expanded
+                // A search reveals matches wherever they are, without disturbing the stored expansion.
+                val showChildren = (isExpanded || query.isNotBlank()) && hasChildren
                 val descendants =
-                    if (isExpanded && directory.id !in ancestors) {
+                    if (showChildren && directory.id !in ancestors) {
                         visit(directory.id, depth + 1, ancestors + directory.id, treeKey)
                     } else {
                         emptyList()
                     }
                 val directMatch = directory.title.contains(query, true) || directory.id.contains(query, true)
+                val directorySessions = sessions[directory.id].orEmpty()
                 val sessionMatch =
-                    sessions.any { session ->
-                        session.subtitle == directory.id && (session.title.contains(query, true) || session.id.contains(query, true))
+                    directorySessions.any { session ->
+                        session.title.contains(query, true) || session.id.contains(query, true)
                     }
                 if (query.isBlank() || directMatch || sessionMatch || descendants.isNotEmpty()) {
-                    add(AgentwireWorkspaceRow(directory, depth, treeKey))
+                    add(
+                        AgentwireWorkspaceRow(
+                            item = directory,
+                            depth = depth,
+                            treeKey = treeKey,
+                            hasChildren = hasChildren,
+                            expanded = isExpanded || query.isNotBlank(),
+                            sessionCount =
+                                if (directory.id in loadedSessionDirectories) {
+                                    directorySessions.size
+                                } else {
+                                    directory.raw.int("sessionCount")
+                                },
+                        ),
+                    )
                     addAll(descendants)
                 }
             }
@@ -1575,7 +1607,14 @@ private fun AgentwireStatusSheet(
 ) {
     var tab by remember { mutableStateOf(AgentwireStatusTab.BROWSE) }
     var search by remember { mutableStateOf("") }
-    val expandedDirectories = remember { mutableStateMapOf<String, Boolean>() }
+    var appliedSearch by remember { mutableStateOf("") }
+    // The field echoes every keystroke; filtering the tree waits for a pause in typing.
+    LaunchedEffect(search) {
+        delay(AGENTWIRE_SEARCH_DEBOUNCE_MS)
+        appliedSearch = search
+    }
+    // The browser opens full height: a directory tree is unusable in a half sheet.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val initialModel =
         state.settings["model"]?.takeIf(String::isNotBlank)
             ?: state.modelOptions.firstOrNull { it.default }?.value
@@ -1604,18 +1643,15 @@ private fun AgentwireStatusSheet(
     LaunchedEffect(canBrowse) {
         if (canBrowse) viewModel.refreshSessionBrowser()
     }
-    val roots = state.workspaceChildren[""].orEmpty()
-    LaunchedEffect(roots) {
-        roots.forEach { root ->
-            expandedDirectories[root.id] = true
-            if (root.id !in state.workspaceChildren) {
-                viewModel.expandWorkspace(root.id, root.raw.bool("hasChildren") ?: true)
-            }
-        }
-    }
-    val workspaceSessions = state.workspaceSessions.values.flatten()
-    val rows = workspaceRows(state.workspaceChildren, expandedDirectories, workspaceSessions, search)
-    ModalBottomSheet(onDismissRequest = dismiss) {
+    val rows =
+        workspaceRows(
+            children = state.workspaceChildren,
+            expanded = state.expandedDirectories,
+            sessions = state.workspaceSessions,
+            loadedSessionDirectories = state.loadedSessionDirectories,
+            query = appliedSearch,
+        )
+    ModalBottomSheet(onDismissRequest = dismiss, sheetState = sheetState, modifier = Modifier.fillMaxHeight()) {
         SheetSystemBars()
         LazyColumn(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { Text("Agent session", style = MaterialTheme.typography.titleLarge) }
@@ -1654,13 +1690,14 @@ private fun AgentwireStatusSheet(
                     AgentwireLiveSessions(
                         sessions =
                             state.liveSessions.filter { session ->
-                                search.isBlank() ||
-                                    session.title.contains(search, true) ||
-                                    session.id.contains(search, true) ||
-                                    session.subtitle?.contains(search, true) == true
+                                appliedSearch.isBlank() ||
+                                    session.title.contains(appliedSearch, true) ||
+                                    session.id.contains(appliedSearch, true) ||
+                                    session.subtitle?.contains(appliedSearch, true) == true
                             },
                         activeSid = state.activeSid,
                         actions = state.actions,
+                        statuses = state.sessionStatuses,
                         onAttach = { sid, cwd ->
                             viewModel.attachSession(sid, cwd)
                             dismiss()
@@ -1673,7 +1710,7 @@ private fun AgentwireStatusSheet(
                 if (rows.isEmpty()) {
                     item {
                         Text(
-                            if (search.isBlank()) {
+                            if (appliedSearch.isBlank()) {
                                 "No project directories advertised by the bridge"
                             } else {
                                 "No matching projects"
@@ -1684,31 +1721,44 @@ private fun AgentwireStatusSheet(
                 }
                 rows.forEach { row ->
                     val directory = row.item
-                    val expanded = expandedDirectories[directory.id] == true
+                    val expanded = row.expanded
                     item(key = "directory:${row.treeKey}") {
                         Surface(
                             color = if (directory.id == state.cwd) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
                             modifier =
-                                Modifier.fillMaxWidth().padding(start = (row.depth * 14).dp).clickable {
-                                    expandedDirectories[directory.id] = !expanded
-                                    if (!expanded && (
-                                            directory.id !in state.workspaceChildren ||
-                                                directory.id !in state.loadedSessionDirectories
-                                        )
-                                    ) {
-                                        viewModel.expandWorkspace(
-                                            directory.id,
-                                            directory.raw.bool("hasChildren") ?: true,
-                                        )
-                                    }
-                                },
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = (row.depth * 14).dp)
+                                    .testTag("agentwire_browser_directory_${directory.id}")
+                                    .clickable {
+                                        viewModel.toggleWorkspaceExpansion(directory.id, row.hasChildren)
+                                    },
                         ) {
                             Row(Modifier.padding(start = 10.dp, end = 4.dp, top = 7.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (expanded) "▾" else "▸", fontFamily = FontFamily.Monospace)
+                                // A leaf directory has nothing to unfold, so it never offers a chevron.
+                                Text(
+                                    when {
+                                        !row.hasChildren -> "·"
+                                        expanded -> "▾"
+                                        else -> "▸"
+                                    },
+                                    fontFamily = FontFamily.Monospace,
+                                )
                                 Spacer(Modifier.width(8.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(directory.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(directory.id, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (row.sessionCount != null) {
+                                    Text(
+                                        if (row.sessionCount == 1) "1 session" else "${row.sessionCount} sessions",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier =
+                                            Modifier
+                                                .padding(horizontal = 4.dp)
+                                                .testTag("agentwire_browser_count_${directory.id}"),
+                                    )
                                 }
                                 TextButton(
                                     onClick = {
@@ -1723,7 +1773,9 @@ private fun AgentwireStatusSheet(
                     if (expanded) {
                         val matchingSessions =
                             state.workspaceSessions[directory.id].orEmpty().filter { session ->
-                                search.isBlank() || session.title.contains(search, true) || session.id.contains(search, true)
+                                appliedSearch.isBlank() ||
+                                    session.title.contains(appliedSearch, true) ||
+                                    session.id.contains(appliedSearch, true)
                             }
                         items(matchingSessions, key = { "session:${row.treeKey}:${it.id}" }) { session ->
                             Box(Modifier.padding(start = ((row.depth + 1) * 14).dp)) {
@@ -1731,6 +1783,7 @@ private fun AgentwireStatusSheet(
                                     session = session,
                                     active = session.id == state.activeSid,
                                     actions = state.actions,
+                                    status = state.sessionStatuses[session.id],
                                     onAttach = { sid, cwd ->
                                         viewModel.attachSession(sid, cwd)
                                         dismiss()
@@ -1890,6 +1943,7 @@ internal fun AgentwireLiveSessions(
     sessions: List<AgentwireListItem>,
     activeSid: String?,
     actions: Set<String>,
+    statuses: Map<String, AgentwireSessionStatus> = emptyMap(),
     onAttach: (String, String?) -> Unit,
     onRename: (String, String) -> Unit = { _, _ -> },
     onFork: (String) -> Unit = {},
@@ -1911,6 +1965,7 @@ internal fun AgentwireLiveSessions(
                     session = session,
                     active = session.id == activeSid,
                     actions = actions,
+                    status = statuses[session.id],
                     onAttach = onAttach,
                     onRename = onRename,
                     onFork = onFork,
@@ -1927,6 +1982,7 @@ private fun AgentwireSessionRow(
     session: AgentwireListItem,
     active: Boolean,
     actions: Set<String>,
+    status: AgentwireSessionStatus? = null,
     onAttach: (String, String?) -> Unit,
     onRename: (String, String) -> Unit,
     onFork: (String) -> Unit,
@@ -1935,8 +1991,8 @@ private fun AgentwireSessionRow(
     var expanded by remember(session.id) { mutableStateOf(false) }
     var title by remember(session.id, session.title) { mutableStateOf(session.title) }
     val archived = "archived" in session.raw.stringList("flags")
-    val runtimeStatus = agentwireSessionRuntimeStatus(session)
-    val tuiAttached = session.raw.bool("tuiAttached") == true
+    val runtimeStatus = agentwireSessionRuntimeStatus(session, status)
+    val tuiAttached = status?.tuiAttached ?: (session.raw.bool("tuiAttached") == true)
     Card(
         modifier =
             Modifier

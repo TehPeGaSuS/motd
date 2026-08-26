@@ -157,6 +157,11 @@ data class AgentwireUiState(
     val liveSessions: List<AgentwireListItem> = emptyList(),
     val workspaceSessions: Map<String, List<AgentwireListItem>> = emptyMap(),
     val loadedSessionDirectories: Set<String> = emptySet(),
+    /**
+     * Browser tree expansion, hoisted out of composition so a refresh, a resync, or a sheet
+     * reopen all reopen exactly what the user had open.
+     */
+    val expandedDirectories: Set<String> = emptySet(),
     /** Sessions this channel bound before, newest first; persisted by [AgentwirePrefs]. */
     val recentSessions: List<AgentwireRecentSession> = emptyList(),
     val queue: List<AgentwireQueueItem> = emptyList(),
