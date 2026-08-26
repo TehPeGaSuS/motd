@@ -22,6 +22,15 @@ class AccountSetupInputTest {
     }
 
     @Test
+    fun `Libera advances only after explicit registration and verification success`() {
+        assertTrue(liberaRegistrationAccepted("An email containing nickname activation instructions has been sent to a@example.org."))
+        assertEquals(false, liberaRegistrationAccepted("The nickname alice cannot be registered."))
+        assertTrue(liberaVerificationSucceeded("alice has now been verified."))
+        assertTrue(liberaVerificationSucceeded("alice is already verified."))
+        assertEquals(false, liberaVerificationSucceeded("Invalid key for registration."))
+    }
+
+    @Test
     fun `canonical OFTC uses NickServ instead of unsupported SASL`() {
         val network =
             NetworkEntity(

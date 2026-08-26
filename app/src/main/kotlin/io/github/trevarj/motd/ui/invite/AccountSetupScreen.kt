@@ -114,6 +114,12 @@ fun AccountSetupContent(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("account_setup_email"),
                     )
+                    if (state.provider == AccountEnrollmentProvider.LIBERA) {
+                        Text(
+                            stringResource(R.string.account_setup_libera_email_help),
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     state.error?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
                     Button(onClick = onSubmit, modifier = Modifier.fillMaxWidth().testTag("account_setup_submit")) {
                         Text(stringResource(R.string.account_setup_create))

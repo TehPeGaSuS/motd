@@ -214,8 +214,12 @@ class AccountSetupViewModel
 
                         AccountEnrollmentProvider.LIBERA -> {
                             val response = sendNickServ("VERIFY REGISTER ${draft.account} ${requireNotNull(code)}")
-                            _state.value = _state.value.copy(serverMessage = response)
-                            activate(draft)
+                            if (liberaVerificationSucceeded(response)) {
+                                _state.value = _state.value.copy(serverMessage = response)
+                                activate(draft)
+                            } else {
+                                _state.value = _state.value.copy(phase = AccountSetupPhase.VERIFY, serverMessage = null, error = response)
+                            }
                         }
 
                         AccountEnrollmentProvider.OFTC -> {
@@ -284,11 +288,10 @@ class AccountSetupViewModel
             resumed: Boolean,
         ) {
             val response = sendNickServ("REGISTER ${draft.password} ${draft.email}")
-            if (response.contains("already registered", ignoreCase = true) || response.contains("cannot be registered", ignoreCase = true)) {
-                if (!resumed) {
-                    fail(response)
-                    return
-                }
+            val alreadyRegistered = response.contains("already registered", ignoreCase = true)
+            if (!liberaRegistrationAccepted(response) && !(resumed && alreadyRegistered)) {
+                fail(response)
+                return
             }
             val pending = draft.copy(phase = AccountEnrollmentPhase.AWAITING_VERIFICATION)
             enrollment.putAccountDraft(pending)
@@ -507,6 +510,22 @@ internal fun parseOftcVerificationUrl(response: String): String? =
         }
 
 internal fun oftcAccountVerified(response: String): Boolean = !response.contains("unverified", ignoreCase = true) && Regex("\\bverified\\b", RegexOption.IGNORE_CASE).containsMatchIn(response)
+
+internal fun liberaRegistrationAccepted(response: String): Boolean =
+    !nickServRejected(response) &&
+        (
+            response.contains("activation instructions", ignoreCase = true) ||
+                response.contains("verification command", ignoreCase = true) ||
+                response.contains("complete registration", ignoreCase = true)
+        )
+
+internal fun liberaVerificationSucceeded(response: String): Boolean =
+    !nickServRejected(response) &&
+        (
+            response.contains("has now been verified", ignoreCase = true) ||
+                response.contains("already verified", ignoreCase = true) ||
+                response.contains("verification successful", ignoreCase = true)
+        )
 
 internal fun nickServRejected(response: String): Boolean =
     response.contains("did not answer", ignoreCase = true) ||

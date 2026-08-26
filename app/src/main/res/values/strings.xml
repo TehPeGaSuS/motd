@@ -1404,6 +1404,7 @@
     <string name="account_setup_account">Your name</string>
     <string name="account_setup_email_required">Recovery email</string>
     <string name="account_setup_email_optional">Recovery email (optional)</string>
+    <string name="account_setup_libera_email_help">Use a real, non-disposable email. Libera.Chat sends the verification command there and removes unverified accounts after about 24 hours.</string>
     <string name="account_setup_create">Create account</string>
     <string name="account_setup_verify_help">Check your email, then paste the verification code or exact VERIFY REGISTER command.</string>
     <string name="account_setup_code">Verification code</string>
