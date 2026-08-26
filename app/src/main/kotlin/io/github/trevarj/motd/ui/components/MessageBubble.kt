@@ -203,9 +203,11 @@ private fun Modifier.mentionHighlight(accent: Color): Modifier =
  * italic no-bubble, plus reply/image/reactions decorations). System-event kinds are rendered by
  * [SystemEventPill] upstream, not here.
  *
- * Grouping: [showSender] draws the nick-colored name + avatar (own messages omit the name). Own
- * bubbles are right-aligned `primaryContainer`; others left `surfaceContainerHigh`. Corner radii
- * tighten on the grouped inner edge.
+ * Grouping: [showSender] draws the nick-colored name on a group's first bubble, own included — a
+ * silent nick change (e.g. an identify failure bouncing you to Guest-1234) belongs on your own
+ * bubble too, not just others'. Only the avatar stays other-senders-only. Own bubbles are
+ * right-aligned `primaryContainer`; others left `surfaceContainerHigh`. Corner radii tighten on
+ * the grouped inner edge.
  */
 internal fun botDisplayName(
     sender: String,
@@ -473,7 +475,9 @@ fun MessageBubble(
                         onLongClickLabel = actionsLabel,
                     ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
-            if (showSender && !isSelf) {
+            if (showSender) {
+                // Shown for self too: a nick change (e.g. a silent identify failure bouncing you to
+                // Guest-1234) is exactly the kind of thing your own bubble should surface, not hide.
                 val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
