@@ -37,6 +37,7 @@ import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.components.chatBubbleWidth
 import io.github.trevarj.motd.ui.components.messageBubbleRoleColors
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlin.math.max
@@ -375,6 +376,7 @@ private fun MorphingGhost(
             isSelf = true,
             mentionHighlighted = false,
             kind = MessageKind.PRIVMSG,
+            semantic = LocalMotdSemanticColors.current,
         )
     val fieldInk = MaterialTheme.colorScheme.onSurface
     val plainText = remember(flight.text) { plainIrcText(flight.text) }

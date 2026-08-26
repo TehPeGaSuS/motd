@@ -84,11 +84,13 @@ import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.parseInlineCode
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdLottieMotion
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.MotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.lottieStrokeColor
@@ -126,12 +128,15 @@ internal fun messageBubbleRoleColors(
     isSelf: Boolean,
     mentionHighlighted: Boolean,
     kind: MessageKind,
+    semantic: MotdSemanticColors,
 ): MessageBubbleRoleColors =
     when {
         mentionHighlighted && !isSelf -> {
+            // The theme's notice/warning role, not a bespoke color: a mention is an attention cue,
+            // and warning already reads that way without success's positive connotation.
             MessageBubbleRoleColors(
-                scheme.secondaryContainer,
-                scheme.onSecondaryContainer,
+                semantic.warningContainer,
+                semantic.onWarningContainer,
             )
         }
 
@@ -262,7 +267,7 @@ fun MessageBubble(
     val mentionHighlighted = hasMention && !isSelf
     val renderedModifier =
         if (mentionHighlighted && kind != MessageKind.ACTION) {
-            modifier.mentionHighlight(accent = MaterialTheme.colorScheme.secondary)
+            modifier.mentionHighlight(accent = LocalMotdSemanticColors.current.warning)
         } else {
             modifier
         }
@@ -418,6 +423,7 @@ fun MessageBubble(
             isSelf,
             mentionHighlighted,
             kind,
+            LocalMotdSemanticColors.current,
         )
     val bubbleColor = bubbleRoles.container
     val textColor = bubbleRoles.content
@@ -643,15 +649,16 @@ private fun ComfortableActionBubble(
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
     val actionLabel = remember(sender, text) { actionAccessibilityLabel(sender, text) }
+    val semanticColors = LocalMotdSemanticColors.current
     val rowColor =
         if (hasMention) {
-            MaterialTheme.colorScheme.secondaryContainer
+            semanticColors.warningContainer
         } else {
             MaterialTheme.colorScheme.tertiaryContainer
         }
     val bodyColor =
         if (hasMention) {
-            MaterialTheme.colorScheme.onSecondaryContainer
+            semanticColors.onWarningContainer
         } else {
             MaterialTheme.colorScheme.onTertiaryContainer
         }
@@ -871,15 +878,16 @@ private fun ActionMessageRow(
     val actionDescription = stringResource(R.string.chat_action_message)
     val actionLabel = remember(sender, text) { actionAccessibilityLabel(sender, text) }
     val spacing = LocalSpacing.current
+    val semanticColors = LocalMotdSemanticColors.current
     val accent =
         if (hasMention) {
-            MaterialTheme.colorScheme.secondary
+            semanticColors.warning
         } else {
             MaterialTheme.colorScheme.tertiary
         }
     val rowColor =
         if (hasMention) {
-            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+            semanticColors.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
         } else {
             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = ACTION_ROW_TINT_ALPHA)
         }
@@ -1191,7 +1199,7 @@ private fun TwoLineMessageRow(
     // behind the whole row so runs of a nick's messages are trackable by speaker.
     val rowTint =
         if (hasMention) {
-            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+            LocalMotdSemanticColors.current.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
         } else {
             nameColor.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
         }
