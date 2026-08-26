@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Mail
 import androidx.compose.material.icons.outlined.Notifications
@@ -242,6 +243,7 @@ fun ChatListScreen(
         onScanInvite = onScanInvite,
         onOpenChannelList = onOpenChannelList,
         onMarkAllRead = viewModel::markCurrentScopeRead,
+        onMarkSelectedRead = viewModel::markSelectedRead,
         onMoveNetwork = viewModel::moveNetwork,
         onCommitNetworkOrder = viewModel::commitNetworkOrder,
         selectedBufferId = selectedBufferId,
@@ -314,6 +316,7 @@ fun ChatListContent(
     onScanInvite: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
     onMarkAllRead: () -> Unit = {},
+    onMarkSelectedRead: (Collection<Long>) -> Unit = {},
     // Manual drawer order (see DrawerReorder.kt); defaulted so previews and tests stay terse.
     onMoveNetwork: (Long, Int) -> Unit = { _, _ -> },
     onCommitNetworkOrder: (List<Long>) -> Unit = {},
@@ -535,6 +538,16 @@ fun ChatListContent(
                                             },
                                             modifier = Modifier.testTag("chatlist_selection_mute"),
                                         ) { Icon(if (muteTarget) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications, stringResource(if (muteTarget) R.string.chatlist_mute else R.string.chatlist_unmute)) }
+                                        IconButton(
+                                            onClick = {
+                                                // Explicit per-selection action: unlike mark-all, this
+                                                // includes muted rows on purpose (hand-picking one is
+                                                // opting it in).
+                                                onMarkSelectedRead(selectedRows.map(ChatListRow::bufferId))
+                                                selectedIds = emptyList()
+                                            },
+                                            modifier = Modifier.testTag("chatlist_selection_mark_read"),
+                                        ) { Icon(Icons.Outlined.DoneAll, stringResource(R.string.chatlist_mark_read)) }
                                         IconButton(
                                             onClick = {
                                                 setArchivedWithReveal(selectedRows.map(ChatListRow::bufferId), !archiveMode)
