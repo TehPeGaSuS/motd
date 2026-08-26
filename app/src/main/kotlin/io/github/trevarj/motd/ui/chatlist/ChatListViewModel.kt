@@ -522,6 +522,16 @@ class ChatListViewModel
             viewModelScope.launch { markChatsRead(bufferIds, readMarkerRepository, connectionManager) }
         }
 
+        /**
+         * Mark an explicit selection read, muted rows included: mark-all deliberately skips muted
+         * chats, but a user hand-selecting one is opting it in on purpose.
+         */
+        fun markSelectedRead(bufferIds: Collection<Long>) {
+            val ids = bufferIds.toList().distinct()
+            if (ids.isEmpty()) return
+            viewModelScope.launch { markChatsRead(ids, readMarkerRepository, connectionManager) }
+        }
+
         private fun setSelection(networkId: Long?) {
             selection.value = networkId
             savedStateHandle[KEY_SELECTED] = networkId
