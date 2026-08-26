@@ -7,15 +7,6 @@ import org.junit.Test
 
 class ChatListMessagePreviewTest {
     @Test
-    fun `preview strips mIRC control codes without adding formatting spans`() {
-        val colorCode = 0x03.toChar()
-        val raw = "[" + colorCode + "02OneFM" + colorCode + "] DJ: Auto DJ"
-        val preview = chatListPreviewText(raw)
-        assertEquals("[OneFM] DJ: Auto DJ", preview.text)
-        assertEquals(0, preview.spanStyles.size)
-    }
-
-    @Test
     fun `voice fallback becomes a compact voice preview`() {
         assertEquals(
             ChatListMessagePreview.Voice(durationMs = 14_000),

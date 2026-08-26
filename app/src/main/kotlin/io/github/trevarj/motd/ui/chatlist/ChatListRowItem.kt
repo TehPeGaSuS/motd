@@ -46,7 +46,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -60,7 +59,6 @@ import io.github.trevarj.motd.audio.parseAudioAttachments
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.prefs.TimeFormat
-import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
@@ -158,12 +156,6 @@ internal sealed interface ChatListMessagePreview {
         val durationMs: Long?,
     ) : ChatListMessagePreview
 }
-
-/**
- * The preview line renders as plain text only: no color/bold/italic spans, just mIRC control codes
- * stripped (a color prefix like `\x0302` must not leak into the row as literal digits).
- */
-internal fun chatListPreviewText(text: String): AnnotatedString = AnnotatedString(plainIrcText(text))
 
 internal fun chatListMessagePreview(text: String?): ChatListMessagePreview {
     val value = text.orEmpty()
@@ -418,11 +410,12 @@ fun ChatListRowItem(
                     text =
                         when (preview) {
                             is ChatListMessagePreview.Text -> {
-                                chatListPreviewText(preview.value)
+                                androidx.compose.ui.text
+                                    .AnnotatedString(preview.value)
                             }
 
                             is ChatListMessagePreview.Voice -> {
-                                AnnotatedString(
+                                androidx.compose.ui.text.AnnotatedString(
                                     buildString {
                                         append(stringResource(R.string.chatlist_voice_message))
                                         preview.durationMs?.let { append(" · ${formatAudioDuration(it)}") }
