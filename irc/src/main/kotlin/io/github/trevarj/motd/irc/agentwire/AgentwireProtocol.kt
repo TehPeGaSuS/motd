@@ -100,6 +100,7 @@ val AGENTWIRE_EVENT_KINDS =
         "tool.updated",
         "tool.completed",
         "usage.updated",
+        "subagent.updated",
         "request.opened",
         "request.resolved",
         "approval.review.started",
