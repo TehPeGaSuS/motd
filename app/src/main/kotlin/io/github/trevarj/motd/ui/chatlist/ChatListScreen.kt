@@ -40,6 +40,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -47,6 +48,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Delete
@@ -66,6 +68,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
@@ -129,10 +133,12 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.HapticFeedbackConstantsCompat
 import androidx.core.view.ViewCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -440,7 +446,17 @@ fun ChatListContent(
                         ) { mode ->
                             when (mode) {
                                 ChatListTopBarMode.SELECTION -> {
-                                    Text(pluralStringResource(R.plurals.chatlist_selected_count, lastSelectedRows.size, lastSelectedRows.size))
+                                    // Never wrap: a growing action row must shrink this font instead
+                                    // of pushing the count to multiple lines and blowing out the bar's
+                                    // height. Ellipsis is only the last-resort floor once even the
+                                    // smallest step can't fit (e.g. a huge selected count on a tiny
+                                    // screen).
+                                    Text(
+                                        pluralStringResource(R.plurals.chatlist_selected_count, lastSelectedRows.size, lastSelectedRows.size),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        autoSize = TextAutoSize.StepBased(minFontSize = 14.sp, maxFontSize = 22.sp),
+                                    )
                                 }
 
                                 ChatListTopBarMode.INVITATIONS -> {
@@ -524,25 +540,14 @@ fun ChatListContent(
                                         // still apply to the live selection.
                                         val pinTarget = aggregateToggleTarget(lastSelectedRows) { it.pinned }
                                         val muteTarget = aggregateToggleTarget(lastSelectedRows) { it.muted }
+                                        var overflowOpen by remember { mutableStateOf(false) }
+                                        // Only the three most-reached-for actions stay inline; pin and
+                                        // archive move behind "more" so a growing action set never
+                                        // starves the title (the autoSize/ellipsis fallback above is
+                                        // the last resort, not the primary fix) or forces icons to
+                                        // shrink/wrap on narrower phones.
                                         IconButton(
                                             onClick = {
-                                                onSetPinned(selectedRows.map(ChatListRow::bufferId), pinTarget)
-                                                selectedIds = emptyList()
-                                            },
-                                            modifier = Modifier.testTag("chatlist_selection_pin"),
-                                        ) { Icon(Icons.Filled.PushPin, stringResource(if (pinTarget) R.string.chatlist_pin else R.string.chatlist_unpin)) }
-                                        IconButton(
-                                            onClick = {
-                                                onSetMuted(selectedRows.map(ChatListRow::bufferId), muteTarget)
-                                                selectedIds = emptyList()
-                                            },
-                                            modifier = Modifier.testTag("chatlist_selection_mute"),
-                                        ) { Icon(if (muteTarget) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications, stringResource(if (muteTarget) R.string.chatlist_mute else R.string.chatlist_unmute)) }
-                                        IconButton(
-                                            onClick = {
-                                                // Explicit per-selection action: unlike mark-all, this
-                                                // includes muted rows on purpose (hand-picking one is
-                                                // opting it in).
                                                 onMarkSelectedRead(selectedRows.map(ChatListRow::bufferId))
                                                 selectedIds = emptyList()
                                             },
@@ -550,13 +555,49 @@ fun ChatListContent(
                                         ) { Icon(Icons.Outlined.DoneAll, stringResource(R.string.chatlist_mark_read)) }
                                         IconButton(
                                             onClick = {
-                                                setArchivedWithReveal(selectedRows.map(ChatListRow::bufferId), !archiveMode)
+                                                onSetMuted(selectedRows.map(ChatListRow::bufferId), muteTarget)
                                                 selectedIds = emptyList()
                                             },
-                                            modifier = Modifier.testTag("chatlist_selection_archive"),
-                                        ) { Icon(archiveActionIcon(archiveMode), stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive)) }
+                                            modifier = Modifier.testTag("chatlist_selection_mute"),
+                                        ) { Icon(if (muteTarget) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications, stringResource(if (muteTarget) R.string.chatlist_mute else R.string.chatlist_unmute)) }
                                         IconButton(onClick = { confirmRemoval = true }, modifier = Modifier.testTag("chatlist_selection_remove")) {
                                             Icon(Icons.Outlined.Delete, stringResource(R.string.chatlist_remove))
+                                        }
+                                        Box {
+                                            IconButton(
+                                                onClick = { overflowOpen = true },
+                                                modifier = Modifier.testTag("chatlist_selection_more"),
+                                            ) {
+                                                Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
+                                            }
+                                            DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(if (pinTarget) R.string.chatlist_pin else R.string.chatlist_unpin)) },
+                                                    leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                                                    modifier = Modifier.testTag("chatlist_selection_pin"),
+                                                    onClick = {
+                                                        onSetPinned(selectedRows.map(ChatListRow::bufferId), pinTarget)
+                                                        selectedIds = emptyList()
+                                                        overflowOpen = false
+                                                    },
+                                                )
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            stringResource(
+                                                                if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive,
+                                                            ),
+                                                        )
+                                                    },
+                                                    leadingIcon = { Icon(archiveActionIcon(archiveMode), contentDescription = null) },
+                                                    modifier = Modifier.testTag("chatlist_selection_archive"),
+                                                    onClick = {
+                                                        setArchivedWithReveal(selectedRows.map(ChatListRow::bufferId), !archiveMode)
+                                                        selectedIds = emptyList()
+                                                        overflowOpen = false
+                                                    },
+                                                )
+                                            }
                                         }
                                     }
 
