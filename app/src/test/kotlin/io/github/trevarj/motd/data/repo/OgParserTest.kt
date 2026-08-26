@@ -56,6 +56,14 @@ class OgParserTest {
     }
 
     @Test
+    fun decodesNumericAndNamedEntities() {
+        val html =
+            """<meta property="og:title" content="Tor is back &#8211; PTirc &mdash; &#x2026;">"""
+        val p = LinkPreviewRepositoryImpl.parseOgTags(url, html)!!
+        assertEquals("Tor is back – PTirc — …", p.title)
+    }
+
+    @Test
     fun noExtractableTags_returnsNull() {
         val html = "<html><body>no metadata at all</body></html>"
         assertNull(LinkPreviewRepositoryImpl.parseOgTags(url, html))
