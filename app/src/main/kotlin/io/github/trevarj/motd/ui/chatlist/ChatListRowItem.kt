@@ -46,6 +46,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -162,8 +163,7 @@ internal sealed interface ChatListMessagePreview {
  * The preview line renders as plain text only: no color/bold/italic spans, just mIRC control codes
  * stripped (a color prefix like `\x0302` must not leak into the row as literal digits).
  */
-internal fun chatListPreviewText(text: String): androidx.compose.ui.text.AnnotatedString =
-    androidx.compose.ui.text.AnnotatedString(plainIrcText(text))
+internal fun chatListPreviewText(text: String): AnnotatedString = AnnotatedString(plainIrcText(text))
 
 internal fun chatListMessagePreview(text: String?): ChatListMessagePreview {
     val value = text.orEmpty()
@@ -422,7 +422,7 @@ fun ChatListRowItem(
                             }
 
                             is ChatListMessagePreview.Voice -> {
-                                androidx.compose.ui.text.AnnotatedString(
+                                AnnotatedString(
                                     buildString {
                                         append(stringResource(R.string.chatlist_voice_message))
                                         preview.durationMs?.let { append(" · ${formatAudioDuration(it)}") }
