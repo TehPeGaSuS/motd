@@ -2,8 +2,10 @@ package io.github.trevarj.motd.ui.invite
 
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.service.isDirectOftcEndpoint
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InviteEndpointTest {
@@ -22,6 +24,12 @@ class InviteEndpointTest {
     @Test
     fun `direct endpoint excludes identity credentials`() {
         assertEquals(InviteEndpoint("irc.example", 6697, true), resolveDirectInviteEndpoint(direct.copy(saslUser = "alice", saslPassword = "secret"), false))
+    }
+
+    @Test
+    fun `canonical OFTC TLS endpoint supports guided registration`() {
+        assertTrue(direct.copy(host = "IRC.OFTC.NET.").isDirectOftcEndpoint())
+        assertEquals(false, direct.copy(host = "irc.oftc.net", tls = false).isDirectOftcEndpoint())
     }
 
     @Test

@@ -12,15 +12,17 @@ import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.client.AccountRegistrationResult
 import io.github.trevarj.motd.irc.client.IrcCommandException
+import io.github.trevarj.motd.irc.client.NickServIdentifySyntax
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.isDirectLiberaEndpoint
+import io.github.trevarj.motd.service.isDirectOftcEndpoint
 import io.github.trevarj.motd.ui.settings.sanitizeNickInput
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +36,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.net.URI
 import java.security.SecureRandom
 import java.util.Base64
 import javax.inject.Inject
@@ -52,6 +55,7 @@ data class AccountSetupUiState(
     val emailRequired: Boolean = false,
     val verification: String = "",
     val serverMessage: String? = null,
+    val verificationUrl: String? = null,
     val error: String? = null,
 )
 
@@ -99,12 +103,7 @@ class AccountSetupViewModel
                     }
                     client = connections.clientFor(networkId)
                 }
-                val provider =
-                    draft?.provider ?: when {
-                        network.isDirectLiberaEndpoint() -> AccountEnrollmentProvider.LIBERA
-                        client?.accountRegistrationPolicy != null -> AccountEnrollmentProvider.IRCV3
-                        else -> null
-                    }
+                val provider = draft?.provider ?: accountEnrollmentProvider(network, client?.accountRegistrationPolicy != null)
                 if (provider == null) {
                     _state.value = AccountSetupUiState(phase = AccountSetupPhase.UNSUPPORTED, network = network, error = "This server does not advertise account registration")
                     return@launch
@@ -117,7 +116,10 @@ class AccountSetupViewModel
                         provider = provider,
                         account = draft?.account ?: readyNick,
                         email = draft?.email.orEmpty(),
-                        emailRequired = provider == AccountEnrollmentProvider.LIBERA || client?.accountRegistrationPolicy?.emailRequired == true,
+                        emailRequired =
+                            provider in setOf(AccountEnrollmentProvider.LIBERA, AccountEnrollmentProvider.OFTC) ||
+                                client?.accountRegistrationPolicy?.emailRequired == true,
+                        verificationUrl = draft?.verificationUrl,
                     )
                 if (draft?.phase == AccountEnrollmentPhase.ACTIVATING) activate(draft)
             }
@@ -140,7 +142,7 @@ class AccountSetupViewModel
             val network = state.network ?: return
             val provider = state.provider ?: return
             val account = sanitizeNickInput(state.account)
-            if (account == null) {
+            if (account == null || provider == AccountEnrollmentProvider.OFTC && account.length < 2) {
                 fail("Choose a valid account nickname")
                 return
             }
@@ -165,6 +167,7 @@ class AccountSetupViewModel
                     when (provider) {
                         AccountEnrollmentProvider.IRCV3 -> registerIrcv3(draft)
                         AccountEnrollmentProvider.LIBERA -> registerLibera(draft, resumed = resumedDraft != null)
+                        AccountEnrollmentProvider.OFTC -> registerOftc(draft, resumed = resumedDraft != null)
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -189,15 +192,19 @@ class AccountSetupViewModel
                         return@launch
                     }
                 val code =
-                    parseVerification(raw, draft) ?: run {
-                        fail("Paste the verification code or exact verification command")
-                        return@launch
+                    if (draft.provider == AccountEnrollmentProvider.OFTC) {
+                        null
+                    } else {
+                        parseVerification(raw, draft) ?: run {
+                            fail("Paste the verification code or exact verification command")
+                            return@launch
+                        }
                     }
                 _state.value = _state.value.copy(phase = AccountSetupPhase.SUBMITTING, error = null)
                 try {
                     when (draft.provider) {
                         AccountEnrollmentProvider.IRCV3 -> {
-                            val result = connections.clientFor(networkId)?.verifyAccount(draft.account, code) ?: error("Connection unavailable")
+                            val result = connections.clientFor(networkId)?.verifyAccount(draft.account, requireNotNull(code)) ?: error("Connection unavailable")
                             if (result is AccountRegistrationResult.Success) {
                                 activate(draft)
                             } else {
@@ -206,15 +213,44 @@ class AccountSetupViewModel
                         }
 
                         AccountEnrollmentProvider.LIBERA -> {
-                            val response = sendNickServ("VERIFY REGISTER ${draft.account} $code")
+                            val response = sendNickServ("VERIFY REGISTER ${draft.account} ${requireNotNull(code)}")
                             _state.value = _state.value.copy(serverMessage = response)
                             activate(draft)
+                        }
+
+                        AccountEnrollmentProvider.OFTC -> {
+                            activateOftc(draft)
                         }
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
                     fail(error.message ?: "Verification failed")
+                }
+            }
+        }
+
+        fun requestOftcVerification() {
+            viewModelScope.launch {
+                val draft = enrollment.accountDraft(networkId)?.takeIf { it.provider == AccountEnrollmentProvider.OFTC } ?: return@launch
+                try {
+                    val identify = sendNickServ("IDENTIFY ${draft.password} ${draft.account}")
+                    if (nickServRejected(identify)) error(identify)
+                    val response = sendNickServ("REVERIFY")
+                    val url = parseOftcVerificationUrl(response)
+                    val pending = draft.copy(phase = AccountEnrollmentPhase.AWAITING_VERIFICATION, verificationUrl = url ?: draft.verificationUrl)
+                    enrollment.putAccountDraft(pending)
+                    _state.value =
+                        _state.value.copy(
+                            phase = AccountSetupPhase.VERIFY,
+                            serverMessage = response,
+                            verificationUrl = pending.verificationUrl,
+                            error = if (url == null) "Open the NickServ conversation to find the verification link." else null,
+                        )
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    _state.value = _state.value.copy(phase = AccountSetupPhase.VERIFY, error = error.message ?: "Could not request another link")
                 }
             }
         }
@@ -259,27 +295,90 @@ class AccountSetupViewModel
             _state.value = _state.value.copy(phase = AccountSetupPhase.VERIFY, serverMessage = response)
         }
 
+        private suspend fun registerOftc(
+            draft: AccountEnrollmentDraft,
+            resumed: Boolean,
+        ) {
+            val response = sendNickServ("REGISTER ${draft.password} ${draft.email}")
+            val rejected = response.contains("already registered", ignoreCase = true) || response.contains("cannot be registered", ignoreCase = true)
+            if (rejected && !resumed) {
+                fail(response)
+                return
+            }
+            val url = parseOftcVerificationUrl(response)
+            val pending = draft.copy(phase = AccountEnrollmentPhase.AWAITING_VERIFICATION, verificationUrl = url)
+            enrollment.putAccountDraft(pending)
+            _state.value =
+                _state.value.copy(
+                    phase = AccountSetupPhase.VERIFY,
+                    serverMessage = response,
+                    verificationUrl = url,
+                    error = if (url == null) "Open the NickServ conversation to find the verification link." else null,
+                )
+        }
+
         private suspend fun sendNickServ(body: String): String =
             coroutineScope {
                 val client = connections.clientFor(networkId) ?: error("Connection unavailable")
-                val response =
-                    async(start = CoroutineStart.UNDISPATCHED) {
+                val responses = Channel<String>(Channel.UNLIMITED)
+                val collector =
+                    launch(start = CoroutineStart.UNDISPATCHED) {
                         client.broadcastEvents
                             .filter {
                                 it is IrcEvent.ChatMessage &&
                                     it.source.nick.equals("NickServ", ignoreCase = true)
                             }.map { (it as IrcEvent.ChatMessage).text }
-                            .first()
+                            .collect(responses::send)
                     }
-                if (!client.sendSensitivePrivmsg("NickServ", body)) {
-                    response.cancel()
-                    error("Connection unavailable")
+                try {
+                    if (!client.sendSensitivePrivmsg("NickServ", body)) error("Connection unavailable")
+                    val first =
+                        withTimeoutOrNull(NICKSERV_REPLY_TIMEOUT_MS) { responses.receive() }
+                            ?: return@coroutineScope "NickServ did not answer in time. Check the NickServ conversation before retrying."
+                    buildList {
+                        add(first)
+                        while (true) add(withTimeoutOrNull(400L) { responses.receive() } ?: break)
+                    }.joinToString("\n")
+                } finally {
+                    collector.cancel()
                 }
-                withTimeoutOrNull(NICKSERV_REPLY_TIMEOUT_MS) { response.await() }
-                    ?: "NickServ did not answer in time. Check the NickServ conversation before retrying."
             }
 
         private suspend fun activate(draft: AccountEnrollmentDraft) {
+            if (draft.provider == AccountEnrollmentProvider.OFTC) {
+                activateOftc(draft)
+            } else {
+                activateSasl(draft)
+            }
+        }
+
+        private suspend fun activateOftc(draft: AccountEnrollmentDraft) {
+            _state.value = _state.value.copy(phase = AccountSetupPhase.ACTIVATING, error = null)
+            val identify = sendNickServ("IDENTIFY ${draft.password} ${draft.account}")
+            if (nickServRejected(identify)) {
+                _state.value = _state.value.copy(phase = AccountSetupPhase.VERIFY, error = identify)
+                return
+            }
+            val info = sendNickServ("INFO ${draft.account}")
+            if (!oftcAccountVerified(info)) {
+                _state.value =
+                    _state.value.copy(
+                        phase = AccountSetupPhase.VERIFY,
+                        serverMessage = info,
+                        error = "OFTC has not confirmed verification yet. Complete the CAPTCHA, then try again.",
+                    )
+                return
+            }
+            val network = networks.networkById(networkId) ?: error("Network no longer exists")
+            val activated = activateOftcNetwork(network, draft)
+            networks.updateNetwork(activated)
+            enrollment.clearAccountDraft(networkId)
+            enrollment.setAccountReminder(networkId, false)
+            _state.value = _state.value.copy(phase = AccountSetupPhase.SUCCESS, network = activated)
+            _events.emit(AccountSetupEvent.Complete)
+        }
+
+        private suspend fun activateSasl(draft: AccountEnrollmentDraft) {
             val network = networks.networkById(networkId) ?: error("Network no longer exists")
             val guestNetwork =
                 network.copy(
@@ -365,7 +464,54 @@ class AccountSetupViewModel
         }
     }
 
+internal fun accountEnrollmentProvider(
+    network: NetworkEntity,
+    hasIrcv3Registration: Boolean,
+): AccountEnrollmentProvider? =
+    when {
+        network.isDirectLiberaEndpoint() -> AccountEnrollmentProvider.LIBERA
+        network.isDirectOftcEndpoint() -> AccountEnrollmentProvider.OFTC
+        hasIrcv3Registration -> AccountEnrollmentProvider.IRCV3
+        else -> null
+    }
+
+internal fun activateOftcNetwork(
+    network: NetworkEntity,
+    draft: AccountEnrollmentDraft,
+): NetworkEntity =
+    network.copy(
+        nick = draft.account,
+        saslMechanism = SaslMechanism.NONE.name,
+        saslUser = null,
+        saslPassword = null,
+        nickServPassword = draft.password,
+        nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_NICK.name,
+        nickServRecoveryEnabled = true,
+        nickServRecoverySequence = "REGAIN",
+    )
+
 internal fun validEmail(value: String?): Boolean = value != null && value.length <= 254 && '@' in value && value.none { it.isWhitespace() || it.isISOControl() }
+
+internal fun parseOftcVerificationUrl(response: String): String? =
+    Regex("https://[^\\s<>\\\"']+")
+        .findAll(response)
+        .map { it.value.trimEnd('.', ',', ')', ']') }
+        .firstOrNull { candidate ->
+            runCatching { URI(candidate) }
+                .getOrNull()
+                ?.let { uri ->
+                    uri.scheme.equals("https", ignoreCase = true) &&
+                        uri.userInfo == null &&
+                        uri.host?.let { host -> host.equals("oftc.net", true) || host.endsWith(".oftc.net", true) } == true
+                } == true
+        }
+
+internal fun oftcAccountVerified(response: String): Boolean = !response.contains("unverified", ignoreCase = true) && Regex("\\bverified\\b", RegexOption.IGNORE_CASE).containsMatchIn(response)
+
+internal fun nickServRejected(response: String): Boolean =
+    response.contains("did not answer", ignoreCase = true) ||
+        listOf("incorrect", "invalid password", "not registered", "not identified", "does not exist", "failed")
+            .any { response.contains(it, ignoreCase = true) }
 
 internal fun parseVerification(
     raw: String,

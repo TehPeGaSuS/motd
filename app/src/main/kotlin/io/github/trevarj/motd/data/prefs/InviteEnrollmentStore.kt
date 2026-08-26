@@ -23,7 +23,7 @@ private val IMPORTED_CERT_PINS = stringPreferencesKey("imported_cert_pins_v1")
 private val CHANNEL_KEY_BACKUPS = stringPreferencesKey("channel_key_backups_v1")
 
 @Serializable
-enum class AccountEnrollmentProvider { IRCV3, LIBERA }
+enum class AccountEnrollmentProvider { IRCV3, LIBERA, OFTC }
 
 @Serializable
 enum class AccountEnrollmentPhase { PREPARED, AWAITING_VERIFICATION, ACTIVATING }
@@ -36,6 +36,7 @@ data class AccountEnrollmentDraft(
     val email: String? = null,
     val password: String,
     val phase: AccountEnrollmentPhase = AccountEnrollmentPhase.PREPARED,
+    val verificationUrl: String? = null,
 )
 
 @Serializable

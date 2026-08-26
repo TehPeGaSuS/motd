@@ -1408,6 +1408,10 @@
     <string name="account_setup_verify_help">Check your email, then paste the verification code or exact VERIFY REGISTER command.</string>
     <string name="account_setup_code">Verification code</string>
     <string name="account_setup_verify">Verify account</string>
+    <string name="account_setup_oftc_verify_help">OFTC requires a quick CAPTCHA before your account is ready. Open the verification page, complete it, then return here.</string>
+    <string name="account_setup_open_verification">Open verification page</string>
+    <string name="account_setup_new_verification">Get a new verification link</string>
+    <string name="account_setup_oftc_verified">I completed verification</string>
     <string name="account_setup_creating">Creating account…</string>
     <string name="account_setup_signing_in">Saving account and signing in…</string>
     <string name="account_setup_success">Account ready</string>

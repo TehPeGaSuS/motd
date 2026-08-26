@@ -19,6 +19,7 @@ import io.github.trevarj.motd.service.ChannelJoinOutcome
 import io.github.trevarj.motd.service.ChannelJoinRejectionKind
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.isDirectLiberaEndpoint
+import io.github.trevarj.motd.service.isDirectOftcEndpoint
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.ui.settings.buildNetworkEntity
@@ -332,7 +333,8 @@ class JoinInviteViewModel
             importedPin = false
             val network = networks.networkById(networkId)
             val accountSupported =
-                network.isDirectLiberaEndpoint() || connections.clientFor(networkId)?.hasCap("draft/account-registration") == true
+                network.isDirectLiberaEndpoint() || network.isDirectOftcEndpoint() ||
+                    connections.clientFor(networkId)?.hasCap("draft/account-registration") == true
             if (accountSupported && network?.saslMechanism == "NONE") enrollment.setAccountReminder(networkId, true)
             onboarding.markCompleted()
             _state.value = _state.value.copy(phase = JoinInvitePhase.READY)

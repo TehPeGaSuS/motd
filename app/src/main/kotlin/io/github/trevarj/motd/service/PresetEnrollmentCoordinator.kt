@@ -10,6 +10,8 @@ import javax.inject.Singleton
 
 private const val LIBERA_HOST = "irc.libera.chat"
 private const val LIBERA_TLS_PORT = 6697
+private const val OFTC_HOST = "irc.oftc.net"
+private const val OFTC_TLS_PORT = 6697
 internal const val MOTD_CHANNEL = "#motd"
 
 /** Turns a persisted preset enrollment into one IRC JOIN on the network's first Ready state. */
@@ -51,6 +53,11 @@ internal fun NetworkEntity?.isDirectLiberaEndpoint(): Boolean =
     this?.role == NetworkRole.DIRECT &&
         host.trim().trimEnd('.').equals(LIBERA_HOST, ignoreCase = true) &&
         port == LIBERA_TLS_PORT && tls
+
+internal fun NetworkEntity?.isDirectOftcEndpoint(): Boolean =
+    this?.role == NetworkRole.DIRECT &&
+        host.trim().trimEnd('.').equals(OFTC_HOST, ignoreCase = true) &&
+        port == OFTC_TLS_PORT && tls
 
 internal fun liberaEndpointChanged(
     before: NetworkEntity,

@@ -134,6 +134,34 @@ class InviteUiTest {
     }
 
     @Test
+    fun oftcVerificationUsesCaptchaLinkInsteadOfCode() {
+        compose.setContent {
+            MotdTheme {
+                AccountSetupContent(
+                    state =
+                        AccountSetupUiState(
+                            phase = AccountSetupPhase.VERIFY,
+                            provider = AccountEnrollmentProvider.OFTC,
+                            account = "alice",
+                            verificationUrl = "https://verify.oftc.net/account/token",
+                        ),
+                    onBack = {},
+                    onAccountChange = {},
+                    onEmailChange = {},
+                    onVerificationChange = {},
+                    onSubmit = {},
+                    onVerify = {},
+                    onRetry = {},
+                )
+            }
+        }
+
+        compose.onNodeWithTag("account_setup_open_verification").assertExists()
+        compose.onNodeWithTag("account_setup_new_verification").assertExists()
+        compose.onNodeWithTag("account_setup_code").assertDoesNotExist()
+    }
+
+    @Test
     fun accountVerificationUsesDedicatedCodeField() {
         compose.setContent {
             MotdTheme {

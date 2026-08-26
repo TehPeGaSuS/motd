@@ -24,12 +24,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.prefs.AccountEnrollmentProvider
 
 @Composable
 fun AccountSetupScreen(
@@ -49,6 +51,7 @@ fun AccountSetupScreen(
         onVerificationChange = viewModel::editVerification,
         onSubmit = viewModel::submit,
         onVerify = viewModel::verify,
+        onRequestOftcVerification = viewModel::requestOftcVerification,
         onRetry = viewModel::retry,
     )
 }
@@ -64,7 +67,9 @@ fun AccountSetupContent(
     onSubmit: () -> Unit,
     onVerify: () -> Unit,
     onRetry: () -> Unit,
+    onRequestOftcVerification: () -> Unit = {},
 ) {
+    val uriHandler = LocalUriHandler.current
     Scaffold(
         topBar = {
             TopAppBar(
@@ -121,18 +126,40 @@ fun AccountSetupContent(
                 }
 
                 AccountSetupPhase.VERIFY -> {
-                    state.serverMessage?.let { Text(it) }
-                    Text(stringResource(R.string.account_setup_verify_help))
-                    OutlinedTextField(
-                        value = state.verification,
-                        onValueChange = onVerificationChange,
-                        label = { Text(stringResource(R.string.account_setup_code)) },
-                        minLines = 2,
-                        modifier = Modifier.fillMaxWidth().testTag("account_setup_code"),
-                    )
-                    state.error?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
-                    Button(onClick = onVerify, modifier = Modifier.fillMaxWidth().testTag("account_setup_verify")) {
-                        Text(stringResource(R.string.account_setup_verify))
+                    if (state.provider == AccountEnrollmentProvider.OFTC) {
+                        Text(stringResource(R.string.account_setup_oftc_verify_help))
+                        state.verificationUrl?.let { url ->
+                            Button(
+                                onClick = { uriHandler.openUri(url) },
+                                modifier = Modifier.fillMaxWidth().testTag("account_setup_open_verification"),
+                            ) {
+                                Text(stringResource(R.string.account_setup_open_verification))
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = onRequestOftcVerification,
+                            modifier = Modifier.fillMaxWidth().testTag("account_setup_new_verification"),
+                        ) {
+                            Text(stringResource(R.string.account_setup_new_verification))
+                        }
+                        state.error?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
+                        Button(onClick = onVerify, modifier = Modifier.fillMaxWidth().testTag("account_setup_verify")) {
+                            Text(stringResource(R.string.account_setup_oftc_verified))
+                        }
+                    } else {
+                        state.serverMessage?.let { Text(it) }
+                        Text(stringResource(R.string.account_setup_verify_help))
+                        OutlinedTextField(
+                            value = state.verification,
+                            onValueChange = onVerificationChange,
+                            label = { Text(stringResource(R.string.account_setup_code)) },
+                            minLines = 2,
+                            modifier = Modifier.fillMaxWidth().testTag("account_setup_code"),
+                        )
+                        state.error?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
+                        Button(onClick = onVerify, modifier = Modifier.fillMaxWidth().testTag("account_setup_verify")) {
+                            Text(stringResource(R.string.account_setup_verify))
+                        }
                     }
                 }
 

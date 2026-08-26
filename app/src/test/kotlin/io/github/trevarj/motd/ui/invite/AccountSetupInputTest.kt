@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.invite
 
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.AccountEnrollmentDraft
 import io.github.trevarj.motd.data.prefs.AccountEnrollmentProvider
 import org.junit.Assert.assertEquals
@@ -17,6 +19,38 @@ class AccountSetupInputTest {
         assertEquals("code", parseVerification("VERIFY REGISTER alice code", draft))
         assertNull(parseVerification("/msg #channel hello everyone", draft))
         assertNull(parseVerification("/msg NickServ VERIFY REGISTER bob code", draft))
+    }
+
+    @Test
+    fun `canonical OFTC uses NickServ instead of unsupported SASL`() {
+        val network =
+            NetworkEntity(
+                id = 2,
+                name = "OFTC",
+                role = NetworkRole.DIRECT,
+                host = "irc.oftc.net",
+                port = 6697,
+                nick = "alice",
+                username = "alice",
+                realname = "Alice",
+            )
+        val oftcDraft = AccountEnrollmentDraft(2, AccountEnrollmentProvider.OFTC, "alice", "a@example.org", "generated-password")
+
+        assertEquals(AccountEnrollmentProvider.OFTC, accountEnrollmentProvider(network, hasIrcv3Registration = false))
+        val activated = activateOftcNetwork(network.copy(saslMechanism = "PLAIN", saslUser = "old", saslPassword = "old"), oftcDraft)
+        assertEquals("NONE", activated.saslMechanism)
+        assertNull(activated.saslPassword)
+        assertEquals("generated-password", activated.nickServPassword)
+        assertEquals("PASSWORD_NICK", activated.nickServIdentifySyntax)
+    }
+
+    @Test
+    fun `OFTC verification accepts only OFTC HTTPS links and confirmed info`() {
+        val url = "https://verify.oftc.net/account/token"
+        assertEquals(url, parseOftcVerificationUrl("Visit $url to continue."))
+        assertNull(parseOftcVerificationUrl("https://oftc.net.evil.example/token"))
+        assertTrue(oftcAccountVerified("Email address: a@example.org (verified)"))
+        assertEquals(false, oftcAccountVerified("Email address: a@example.org (unverified)"))
     }
 
     @Test
