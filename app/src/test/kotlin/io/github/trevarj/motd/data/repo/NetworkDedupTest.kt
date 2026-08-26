@@ -16,9 +16,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Duplicate-connection prevention: adding the same server twice must not
- * insert a second [NetworkEntity] (which would spawn a second actor/socket). Covers the
- * per-role identity key and the idempotent soju-child import.
+ * Duplicate-connection prevention: adding the same server twice must not insert a second
+ * [NetworkEntity] (which would spawn a second actor/socket). DIRECT and BOUNCER_ROOT dedup on
+ * [name][NetworkEntity.name] alone — host/port/nick/credential differences never block a second
+ * add (see [networkIdentityKey]: users filling those in incorrectly, e.g. a WeeChat relay account
+ * missing the ZNC/CLoak `user/network` selector, must not have it silently merged into an
+ * unrelated existing network). BOUNCER_CHILD keeps its own `(parentId, bouncerNetId)` key, since
+ * that path is the soju-child import, not a user-facing add.
  */
 class NetworkDedupTest {
     /** In-memory NetworkDao: only the methods addNetwork touches are backed; rest throw. */
@@ -115,11 +119,12 @@ class NetworkDedupTest {
     }
 
     private fun direct(
-        host: String,
+        name: String,
+        host: String = name,
         port: Int = 6697,
         nick: String = "motd",
     ) = NetworkEntity(
-        name = host,
+        name = name,
         role = NetworkRole.DIRECT,
         host = host,
         port = port,
@@ -129,10 +134,11 @@ class NetworkDedupTest {
     )
 
     private fun root(
-        host: String,
+        name: String,
         saslUser: String?,
+        host: String = name,
     ) = NetworkEntity(
-        name = host,
+        name = name,
         role = NetworkRole.BOUNCER_ROOT,
         host = host,
         port = 6697,
@@ -160,12 +166,12 @@ class NetworkDedupTest {
     )
 
     @Test
-    fun `adding the same direct server twice returns the existing id and no second row`() =
+    fun `adding the same name twice returns the existing id and no second row`() =
         runBlocking {
             val dao = InMemoryNetworkDao()
             val repo = NetworkRepositoryImpl(dao)
-            val first = repo.addNetwork(direct("irc.libera.chat"))
-            val second = repo.addNetwork(direct("irc.libera.chat"))
+            val first = repo.addNetwork(direct("Libera"))
+            val second = repo.addNetwork(direct("Libera"))
             assertEquals(first, second)
             assertEquals(1, dao.rows.size)
         }
@@ -176,100 +182,81 @@ class NetworkDedupTest {
             val dao = InMemoryNetworkDao()
             val repo = NetworkRepositoryImpl(dao)
 
-            val ids = List(20) { async { repo.addNetwork(direct("irc.libera.chat")) } }.awaitAll()
+            val ids = List(20) { async { repo.addNetwork(direct("Libera")) } }.awaitAll()
 
             assertEquals(1, ids.toSet().size)
             assertEquals(1, dao.rows.size)
         }
 
     @Test
-    fun `host normalization dedups trailing-dot and case variants`() =
+    fun `name normalization dedups whitespace and case variants`() =
         runBlocking {
             val dao = InMemoryNetworkDao()
             val repo = NetworkRepositoryImpl(dao)
-            val a = repo.addNetwork(direct("irc.libera.chat"))
-            val b = repo.addNetwork(direct("IRC.Libera.Chat."))
+            val a = repo.addNetwork(direct("Libera"))
+            val b = repo.addNetwork(direct("  libera  "))
             assertEquals(a, b)
             assertEquals(1, dao.rows.size)
         }
 
     @Test
-    fun `different nick on the same server is a distinct network`() =
-        runBlocking {
-            val dao = InMemoryNetworkDao()
-            val repo = NetworkRepositoryImpl(dao)
-            repo.addNetwork(direct("irc.libera.chat", nick = "alice"))
-            repo.addNetwork(direct("irc.libera.chat", nick = "bob"))
-            assertEquals(2, dao.rows.size)
-        }
+    fun `networkNameTaken matches case-insensitively and ignores bouncer children`() {
+        val existing =
+            listOf(
+                direct("Libera").copy(id = 1),
+                child(parentId = 2, netId = "1").copy(id = 3, name = "Libera"),
+            )
+        assertEquals(true, networkNameTaken("libera", existing))
+        assertEquals(true, networkNameTaken("  LIBERA  ", existing))
+        assertEquals(false, networkNameTaken("OFTC", existing))
+        // The BOUNCER_CHILD row happens to share the name "Libera" but must not count: it is an
+        // internal soju mirror, not a name the "Add network" form could ever collide with.
+        assertEquals(false, networkNameTaken("Libera", listOf(child(parentId = 2, netId = "1").copy(name = "Libera"))))
+    }
 
     @Test
-    fun `different ZNC network selectors on one endpoint stay distinct`() =
+    fun `same name but different host, port, or nick still dedups`() =
         runBlocking {
             val dao = InMemoryNetworkDao()
             val repo = NetworkRepositoryImpl(dao)
-            val seed = direct("znc.example.org").copy(saslMechanism = "PLAIN", saslUser = "motd/libera")
-            repo.addNetwork(seed)
-            repo.addNetwork(seed.copy(name = "oftc", saslUser = "motd/oftc"))
-            assertEquals(2, dao.rows.size)
-        }
-
-    @Test
-    fun `same ZNC selector deduplicates`() =
-        runBlocking {
-            val dao = InMemoryNetworkDao()
-            val repo = NetworkRepositoryImpl(dao)
-            val seed = direct("znc.example.org").copy(saslMechanism = "PLAIN", saslUser = "motd/libera")
-            val first = repo.addNetwork(seed)
-            val second = repo.addNetwork(seed.copy(name = "renamed"))
+            val first =
+                repo.addNetwork(
+                    direct("relay", host = "myweechat.0bin.xyz", port = 1343, nick = "alice"),
+                )
+            // Same display name, everything else differs (the WeeChat-relay dedup complaint):
+            // whatever host/port/nick/credentials the user typed the second time, a name collision
+            // alone must still resolve to the existing row rather than silently connecting twice.
+            val second =
+                repo.addNetwork(
+                    direct("relay", host = "myweechat.0bin.xyz", port = 1343, nick = "PeGaSuS"),
+                )
             assertEquals(first, second)
             assertEquals(1, dao.rows.size)
         }
 
     @Test
-    fun `different CLoak network selectors on one endpoint stay distinct`() =
+    fun `different name on the same host, port, and nick is a distinct network`() =
         runBlocking {
             val dao = InMemoryNetworkDao()
             val repo = NetworkRepositoryImpl(dao)
-            val seed = direct("cloak.example.org").copy(serverPassword = "motd/libera:secret")
-            repo.addNetwork(seed)
-            repo.addNetwork(seed.copy(name = "oftc", serverPassword = "motd/oftc:secret"))
+            // The motivating case: a second account on the same relay. Host/port/nick alone must
+            // never merge two rows the user explicitly named differently.
+            repo.addNetwork(direct("01_ptirc", host = "myweechat.0bin.xyz", port = 1343))
+            repo.addNetwork(direct("02_libera", host = "myweechat.0bin.xyz", port = 1343))
             assertEquals(2, dao.rows.size)
         }
 
     @Test
-    fun `same CLoak selector deduplicates without using its password`() =
+    fun `same bouncer root name added twice reuses the row`() =
         runBlocking {
             val dao = InMemoryNetworkDao()
             val repo = NetworkRepositoryImpl(dao)
-            val seed = direct("cloak.example.org").copy(serverPassword = "motd/libera:old-secret")
-            val first = repo.addNetwork(seed)
-            val second = repo.addNetwork(seed.copy(name = "renamed", serverPassword = "motd/libera:new-secret"))
-            assertEquals(first, second)
-            assertEquals(1, dao.rows.size)
-        }
-
-    @Test
-    fun `different port is a distinct network`() =
-        runBlocking {
-            val dao = InMemoryNetworkDao()
-            val repo = NetworkRepositoryImpl(dao)
-            repo.addNetwork(direct("irc.libera.chat", port = 6697))
-            repo.addNetwork(direct("irc.libera.chat", port = 6667))
-            assertEquals(2, dao.rows.size)
-        }
-
-    @Test
-    fun `same bouncer account added twice reuses the root`() =
-        runBlocking {
-            val dao = InMemoryNetworkDao()
-            val repo = NetworkRepositoryImpl(dao)
-            val a = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
-            val b = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
+            val a = repo.addNetwork(root("My Bouncer", saslUser = "acct"))
+            val b = repo.addNetwork(root("My Bouncer", saslUser = "acct"))
             assertEquals(a, b)
             assertEquals(1, dao.rows.size)
-            // A different soju login on the same host is a distinct root.
-            repo.addNetwork(root("bnc.example.org", saslUser = "other"))
+            // A different name is a distinct root even with the same saslUser/host.
+            repo.addNetwork(root("Other Bouncer", saslUser = "acct", host = "bnc.example.org"))
             assertEquals(2, dao.rows.size)
         }
 

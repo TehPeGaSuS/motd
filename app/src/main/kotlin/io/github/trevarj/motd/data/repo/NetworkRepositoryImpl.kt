@@ -72,21 +72,37 @@ class NetworkRepositoryImpl
  *  case-insensitive). Hostnames are ASCII so [lowercase] with the default locale is safe. */
 internal fun normalizeHost(host: String): String = host.trim().trimEnd('.').lowercase()
 
+/** Normalize a network display name for identity comparison: trim and lowercase. */
+internal fun normalizeNetworkName(name: String): String = name.trim().lowercase()
+
+/**
+ * True when [name] collides (case-insensitively) with an existing DIRECT/BOUNCER_ROOT network.
+ * Lets a caller (the "Add network" form) surface a clear error before [NetworkRepositoryImpl.addNetwork]
+ * would otherwise silently reuse that row instead of creating a new one.
+ */
+fun networkNameTaken(
+    name: String,
+    existing: List<NetworkEntity>,
+): Boolean {
+    val normalized = normalizeNetworkName(name)
+    return existing.any { it.role != NetworkRole.BOUNCER_CHILD && normalizeNetworkName(it.name) == normalized }
+}
+
 /**
  * Stable identity key deciding whether two [NetworkEntity] rows are the same server, used by
  * [NetworkRepositoryImpl.addNetwork] to reject duplicates. Keyed per role:
  *
  * - **BOUNCER_CHILD**: `(parentId, bouncerNetId)` — a child is one bouncer-side network under one
  *   root, regardless of host (the mirror may not know the host yet). Guards both the onboarding
- *   import loop and the notify-mirror racing to insert the same child.
- * - **BOUNCER_ROOT**: `(host, port, saslUser)` — one soju account (login) per host:port. Adding
- *   the same bouncer account twice reuses the existing root.
- * - **DIRECT**: `(host, port, nick, bouncer selector?)` — ordinary direct rows use the first
- *   three; ZNC's slash-bearing SASL authcid or CLoak's PASS `user/network:password` adds the
- *   selected upstream network so one endpoint can hold more than one bouncer network.
- *
- * A `null` sub-key element is kept distinct (encoded as an empty segment) so under-specified rows
- * don't collapse onto each other.
+ *   import loop and the notify-mirror racing to insert the same child. This is an internal sync
+ *   mechanism (soju LISTNETWORKS import), not a user-facing add path, so it is untouched by the
+ *   name-based scheme below.
+ * - **BOUNCER_ROOT** and **DIRECT**: `name` alone. Users are responsible for filling in
+ *   host/port/nick/credentials correctly; matching on those fields silently merged distinct rows
+ *   that legitimately share an endpoint (e.g. two accounts on the same relay), which read as a
+ *   broken "Add network" with no feedback. A duplicate *name* is still rejected so re-running
+ *   onboarding for a server the user already added (e.g. picking the Libera preset twice) reuses
+ *   the existing row instead of creating a same-named duplicate.
  */
 internal fun networkIdentityKey(n: NetworkEntity): String =
     when (n.role) {
@@ -94,23 +110,7 @@ internal fun networkIdentityKey(n: NetworkEntity): String =
             "child|${n.parentId}|${n.bouncerNetId.orEmpty()}"
         }
 
-        NetworkRole.BOUNCER_ROOT -> {
-            "root|${normalizeHost(n.host)}|${n.port}|${n.saslUser.orEmpty()}"
-        }
-
-        NetworkRole.DIRECT -> {
-            // ZNC selects an upstream in its SASL authcid; CLoak does so in the non-secret prefix of
-            // PASS. Keep only that selector in the key so passwords never become identity material.
-            val saslSelector = n.saslUser?.takeIf { '/' in it }
-            val passSelector = n.serverPassword?.let(::serverPasswordSelector)
-            val bouncerSelector = saslSelector ?: passSelector.orEmpty()
-            "direct|${normalizeHost(n.host)}|${n.port}|${n.nick}|$bouncerSelector"
+        NetworkRole.BOUNCER_ROOT, NetworkRole.DIRECT -> {
+            "name|${normalizeNetworkName(n.name)}"
         }
     }
-
-/** Extract CLoak's `user/network` selector without retaining its trailing password. */
-private fun serverPasswordSelector(password: String): String? {
-    val slash = password.indexOf('/')
-    val colon = password.lastIndexOf(':')
-    return password.substring(0, colon).takeIf { slash >= 0 && colon > slash }
-}
