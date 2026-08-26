@@ -201,6 +201,13 @@ fun AddNetworkContent(
                                         ?: state.server.host.ifBlank { stringResource(R.string.add_network_kind_network) },
                                 )
                             },
+                            isError = state.nameConflict,
+                            supportingText =
+                                if (state.nameConflict) {
+                                    { Text(stringResource(R.string.add_network_name_taken)) }
+                                } else {
+                                    null
+                                },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("add_network_display_name"),
                         )
@@ -231,6 +238,17 @@ fun AddNetworkContent(
                             )
                         }
                     }
+                }
+                // ZNC hides the display-name field (its network name lives in BouncerLoginFields
+                // instead), so the inline field error above never renders for it; this is the only
+                // place a ZNC name conflict becomes visible.
+                if (state.nameConflict && state.isZnc) {
+                    Text(
+                        text = stringResource(R.string.add_network_name_taken),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag("add_network_name_conflict"),
+                    )
                 }
                 Button(
                     onClick = onSubmit,

@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.repo.networkNameTaken
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.onboarding.AuthForm
@@ -48,6 +49,8 @@ data class AddNetworkUiState(
     val presetId: NetworkPresetId = NetworkPresetId.CUSTOM,
     val showPlaintextWarning: Boolean = false,
     val plaintextConfirmed: Boolean = false,
+    /** True when [submit] rejected this name as already in use by another network. */
+    val nameConflict: Boolean = false,
 ) {
     val isBouncer: Boolean get() = kind == ConnectionChoice.BOUNCER
     val isSoju: Boolean get() = isBouncer && bouncerKind == BouncerKind.SOJU
@@ -98,6 +101,7 @@ class AddNetworkViewModel
                     presetId = if (kind == ConnectionChoice.NETWORK) _state.value.presetId else NetworkPresetId.CUSTOM,
                     showPlaintextWarning = false,
                     plaintextConfirmed = false,
+                    nameConflict = false,
                 )
         }
 
@@ -107,6 +111,7 @@ class AddNetworkViewModel
                     bouncerKind = kind,
                     showPlaintextWarning = false,
                     plaintextConfirmed = false,
+                    nameConflict = false,
                 )
         }
 
@@ -119,6 +124,7 @@ class AddNetworkViewModel
                     presetId = if (selected?.matches(server) == true) current.presetId else NetworkPresetId.CUSTOM,
                     showPlaintextWarning = false,
                     plaintextConfirmed = false,
+                    nameConflict = false,
                 )
         }
 
@@ -131,6 +137,7 @@ class AddNetworkViewModel
                         presetId = NetworkPresetId.CUSTOM,
                         showPlaintextWarning = false,
                         plaintextConfirmed = false,
+                        nameConflict = false,
                     )
                 return
             }
@@ -143,11 +150,12 @@ class AddNetworkViewModel
                     presetId = id,
                     showPlaintextWarning = false,
                     plaintextConfirmed = false,
+                    nameConflict = false,
                 )
         }
 
         fun editDisplayName(name: String) {
-            _state.value = _state.value.copy(displayName = name)
+            _state.value = _state.value.copy(displayName = name, nameConflict = false)
         }
 
         fun editAuth(auth: AuthForm) {
@@ -159,7 +167,7 @@ class AddNetworkViewModel
         }
 
         fun editZncLogin(login: ZncLoginForm) {
-            _state.value = _state.value.copy(zncLogin = login)
+            _state.value = _state.value.copy(zncLogin = login, nameConflict = false)
         }
 
         /** Create the row, connect, and observe its live state. */
@@ -185,19 +193,28 @@ class AddNetworkViewModel
                         } else {
                             s.server
                         }
+                    val effectiveName =
+                        when {
+                            s.isZnc -> s.zncLogin.network.trim()
+                            s.displayName.isNotBlank() -> s.displayName.trim()
+                            else -> networkPreset(s.presetId)?.displayName ?: s.server.host
+                        }
+                    val existingNetworks = networkRepository.observeNetworks().first()
+                    if (networkNameTaken(effectiveName, existingNetworks)) {
+                        // Surface this instead of letting addNetwork's dedup silently reuse the
+                        // existing row: that reconnected an already-live network and closed the
+                        // form with zero feedback, which read as "Save just does nothing."
+                        _state.value = _state.value.copy(nameConflict = true)
+                        return@launch
+                    }
                     val entity =
                         buildNetworkEntity(
                             server = server,
                             auth = s.activeAuth,
                             role = s.role,
-                            name =
-                                when {
-                                    s.isZnc -> s.zncLogin.network.trim()
-                                    s.displayName.isNotBlank() -> s.displayName.trim()
-                                    else -> networkPreset(s.presetId)?.displayName ?: s.server.host
-                                },
+                            name = effectiveName,
                         )
-                    val existingNetworkIds = networkRepository.observeNetworks().first().mapTo(mutableSetOf()) { it.id }
+                    val existingNetworkIds = existingNetworks.mapTo(mutableSetOf()) { it.id }
                     val networkId = networkRepository.addNetwork(entity)
                     if (networkId !in existingNetworkIds && s.presetId == NetworkPresetId.LIBERA) {
                         presetEnrollmentPrefs.markLiberaEligible(networkId)
