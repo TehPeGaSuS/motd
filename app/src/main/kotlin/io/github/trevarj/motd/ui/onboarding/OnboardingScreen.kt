@@ -98,6 +98,7 @@ import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 @Composable
 fun OnboardingScreen(
     onDone: () -> Unit = {},
+    onScanInvite: () -> Unit = {},
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -122,6 +123,7 @@ fun OnboardingScreen(
         onFinish = { viewModel.finish(onDone) },
         onConfirmPlaintext = viewModel::confirmPlaintext,
         onDismissPlaintext = viewModel::dismissPlaintextWarning,
+        onScanInvite = onScanInvite,
     )
 }
 
@@ -147,6 +149,7 @@ fun OnboardingContent(
     onFinish: () -> Unit,
     onConfirmPlaintext: () -> Unit,
     onDismissPlaintext: () -> Unit,
+    onScanInvite: () -> Unit = {},
 ) {
     val steps = OnboardingStep.entries
     val pagerState = rememberPagerState(pageCount = { steps.size })
@@ -211,6 +214,7 @@ fun OnboardingContent(
             onBack = onBack,
             onSkip = onSkip,
             onFinish = onFinish,
+            onScanInvite = onScanInvite,
         )
     }
 
@@ -241,43 +245,57 @@ private fun WizardBar(
     onBack: () -> Unit,
     onSkip: () -> Unit,
     onFinish: () -> Unit,
+    onScanInvite: () -> Unit,
 ) {
-    Row(
+    Column(
         // The activity draws edge-to-edge, so keep the actual touch targets above gesture and
         // three-button navigation. Semantics clicks do not reveal this class of overlap.
         modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (state.step != OnboardingStep.WELCOME) {
-            // Stable handle: Back is icon-agnostic across steps.
-            TextButton(onClick = onBack, modifier = Modifier.testTag("onboarding_back_button")) {
-                Text(stringResource(R.string.onboarding_back))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (state.step != OnboardingStep.WELCOME) {
+                // Stable handle: Back is icon-agnostic across steps.
+                TextButton(onClick = onBack, modifier = Modifier.testTag("onboarding_back_button")) {
+                    Text(stringResource(R.string.onboarding_back))
+                }
+            } else {
+                TextButton(onClick = onSkip, modifier = Modifier.testTag("onboarding_skip_button")) {
+                    Text(stringResource(R.string.onboarding_skip))
+                }
             }
-        } else {
-            TextButton(onClick = onSkip, modifier = Modifier.testTag("onboarding_skip_button")) {
-                Text(stringResource(R.string.onboarding_skip))
+            // Single stable handle for the forward button whose label varies (Get started/Next/Finish).
+            val forwardTag = Modifier.testTag("onboarding_forward_button")
+            when (state.step) {
+                OnboardingStep.WELCOME -> {
+                    Button(onClick = onNext, modifier = forwardTag) {
+                        Text(stringResource(R.string.onboarding_get_started))
+                    }
+                }
+
+                OnboardingStep.FINISH -> {
+                    Button(onClick = onFinish, modifier = forwardTag) {
+                        Text(stringResource(R.string.onboarding_finish))
+                    }
+                }
+
+                else -> {
+                    Button(onClick = onNext, enabled = state.canAdvance, modifier = forwardTag) {
+                        Text(stringResource(R.string.onboarding_next))
+                    }
+                }
             }
         }
-        // Single stable handle for the forward button whose label varies (Get started/Next/Finish).
-        val forwardTag = Modifier.testTag("onboarding_forward_button")
-        when (state.step) {
-            OnboardingStep.WELCOME -> {
-                Button(onClick = onNext, modifier = forwardTag) {
-                    Text(stringResource(R.string.onboarding_get_started))
-                }
-            }
-
-            OnboardingStep.FINISH -> {
-                Button(onClick = onFinish, modifier = forwardTag) {
-                    Text(stringResource(R.string.onboarding_finish))
-                }
-            }
-
-            else -> {
-                Button(onClick = onNext, enabled = state.canAdvance, modifier = forwardTag) {
-                    Text(stringResource(R.string.onboarding_next))
-                }
+        if (state.step == OnboardingStep.WELCOME) {
+            OutlinedButton(
+                onClick = onScanInvite,
+                modifier = Modifier.fillMaxWidth().testTag("onboarding_scan_invite"),
+            ) {
+                Text(stringResource(R.string.invite_scan_title))
             }
         }
     }

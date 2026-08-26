@@ -172,8 +172,10 @@ fun ChatListScreen(
     // Round 5: drawer/network-management pass-throughs.
     onOpenNetworkSettings: (Long) -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
+    onScanInvite: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
     selectedBufferId: Long? = null,
+    suppressOnboarding: Boolean = false,
     onDefaultBufferAvailable: (Long) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
     audioViewModel: AudioPlaybackViewModel = hiltViewModel(),
@@ -187,8 +189,8 @@ fun ChatListScreen(
     val titleConnecting by viewModel.titleConnecting.collectAsStateWithLifecycle()
 
     // Fresh installs enter onboarding once state is loaded; a durable skip keeps the empty main UI.
-    LaunchedEffect(state.loading, state.networks.isEmpty(), state.onboardingComplete) {
-        if (shouldOpenOnboarding(state)) {
+    LaunchedEffect(state.loading, state.networks.isEmpty(), state.onboardingComplete, suppressOnboarding) {
+        if (shouldOpenOnboarding(state, suppressOnboarding)) {
             onOpenOnboarding()
         }
     }
@@ -237,6 +239,7 @@ fun ChatListScreen(
         onServerMessages = { networkId -> viewModel.openServerBuffer(networkId, onOpenBuffer) },
         onOpenNetworkSettings = onOpenNetworkSettings,
         onOpenAddNetwork = onOpenAddNetwork,
+        onScanInvite = onScanInvite,
         onOpenChannelList = onOpenChannelList,
         onMarkAllRead = viewModel::markCurrentScopeRead,
         onMoveNetwork = viewModel::moveNetwork,
@@ -308,6 +311,7 @@ fun ChatListContent(
     onServerMessages: (Long) -> Unit = {},
     onOpenNetworkSettings: (Long) -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
+    onScanInvite: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
     onMarkAllRead: () -> Unit = {},
     // Manual drawer order (see DrawerReorder.kt); defaulted so previews and tests stay terse.
@@ -395,6 +399,10 @@ fun ChatListContent(
                 },
                 onAddNetwork = {
                     onOpenAddNetwork()
+                    scope.launch { drawerState.close() }
+                },
+                onScanInvite = {
+                    onScanInvite()
                     scope.launch { drawerState.close() }
                 },
                 onToggleOffline = { if (state.allOffline) onGoOnline() else onGoOffline() },
@@ -763,7 +771,10 @@ fun ChatListContent(
     }
 }
 
-internal fun shouldOpenOnboarding(state: ChatListState): Boolean = !state.loading && state.networks.isEmpty() && !state.onboardingComplete
+internal fun shouldOpenOnboarding(
+    state: ChatListState,
+    suppressed: Boolean = false,
+): Boolean = !suppressed && !state.loading && state.networks.isEmpty() && !state.onboardingComplete
 
 @Composable
 private fun ScopeChip(

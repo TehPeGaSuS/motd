@@ -304,6 +304,7 @@ fun ChatScreen(
     onOpenAudioOrigin: (AudioPlaybackOrigin) -> Unit = {},
     // Round 5: /list opens the channel browser. Body lands in WP-V3.
     onOpenChannelList: (Long) -> Unit = {},
+    onOpenAccountSetup: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
     voiceViewModel: VoiceMessageViewModel = hiltViewModel(),
 ) {
@@ -428,6 +429,7 @@ fun ChatScreen(
     val audioCacheStatuses by viewModel.audioCacheStatuses.collectAsStateWithLifecycle()
     val replyConfig by viewModel.replyConfig.collectAsStateWithLifecycle()
     val historyAvailability by viewModel.historyAvailability.collectAsStateWithLifecycle()
+    val accountSetupReminder by viewModel.accountSetupReminder.collectAsStateWithLifecycle()
     // Round 5: nick sheet + replay-safe UI events.
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val uiEvents by viewModel.uiEvents.collectAsStateWithLifecycle()
@@ -563,6 +565,9 @@ fun ChatScreen(
         onHistorySyncRetry = viewModel::retryHistorySync,
         onHistorySyncDismiss = viewModel::dismissHistorySyncStatus,
         historyAvailability = historyAvailability,
+        accountSetupReminder = accountSetupReminder,
+        onAccountSetup = { state.buffer?.networkId?.let(onOpenAccountSetup) },
+        onDismissAccountSetup = viewModel::dismissAccountSetupReminder,
         conversationLayout = state.conversationLayout,
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
         onPresenceModeSelected = viewModel::setPresenceModeOverride,
@@ -830,6 +835,9 @@ fun ChatContent(
     // hand-built call sites need nothing; the required E2E gate arms the real one for the journey.
     diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
     avatarEvents: Flow<ConversationAvatarOutcome> = emptyFlow(),
+    accountSetupReminder: Boolean = false,
+    onAccountSetup: () -> Unit = {},
+    onDismissAccountSetup: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
@@ -2036,186 +2044,203 @@ fun ChatContent(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
         topBar = {
-            TopAppBar(
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    ),
-                title = {
-                    Row(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                                .then(
-                                    if (titleClickLabel != null) {
-                                        Modifier.clickable(onClickLabel = titleClickLabel) {
-                                            buffer?.let { onOpenChannelInfo(it.id) }
-                                        }
-                                    } else {
-                                        Modifier
+            Column {
+                TopAppBar(
+                    colors =
+                        TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
+                    title = {
+                        Row(
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .then(
+                                        if (titleClickLabel != null) {
+                                            Modifier.clickable(onClickLabel = titleClickLabel) {
+                                                buffer?.let { onOpenChannelInfo(it.id) }
+                                            }
+                                        } else {
+                                            Modifier
+                                        },
+                                    ).testTag("chat_title"),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val hideAvatar = avatarsHidden()
+                            if (!hideAvatar) {
+                                Avatar(
+                                    name = buffer?.displayName ?: "",
+                                    size = MotdSizes.headerAvatar,
+                                    isChannel = buffer?.type == BufferType.CHANNEL,
+                                    networkId = buffer?.networkId,
+                                    conversationModel = buffer?.avatarOverrideModel,
+                                )
+                            }
+                            // The 10dp gap only separates the title from the avatar beside it.
+                            Column(modifier = Modifier.padding(start = if (hideAvatar) 0.dp else 10.dp).weight(1f)) {
+                                Text(
+                                    text = buffer?.displayName ?: "",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                AnimatedContent(
+                                    targetState = chatSubtitleModel(state, ctx),
+                                    transitionSpec = {
+                                        fadeIn(MotdMotion.microFadeIn) togetherWith
+                                            fadeOut(MotdMotion.microFadeOut)
                                     },
-                                ).testTag("chat_title"),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        val hideAvatar = avatarsHidden()
-                        if (!hideAvatar) {
-                            Avatar(
-                                name = buffer?.displayName ?: "",
-                                size = MotdSizes.headerAvatar,
-                                isChannel = buffer?.type == BufferType.CHANNEL,
-                                networkId = buffer?.networkId,
-                                conversationModel = buffer?.avatarOverrideModel,
-                            )
-                        }
-                        // The 10dp gap only separates the title from the avatar beside it.
-                        Column(modifier = Modifier.padding(start = if (hideAvatar) 0.dp else 10.dp).weight(1f)) {
-                            Text(
-                                text = buffer?.displayName ?: "",
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            AnimatedContent(
-                                targetState = chatSubtitleModel(state, ctx),
-                                transitionSpec = {
-                                    fadeIn(MotdMotion.microFadeIn) togetherWith
-                                        fadeOut(MotdMotion.microFadeOut)
-                                },
-                                label = "chat_subtitle",
-                            ) { subtitle ->
-                                when (subtitle) {
-                                    is ChatSubtitleModel.Text -> {
-                                        Text(
-                                            text = subtitle.value,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
+                                    label = "chat_subtitle",
+                                ) { subtitle ->
+                                    when (subtitle) {
+                                        is ChatSubtitleModel.Text -> {
+                                            Text(
+                                                text = subtitle.value,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
 
-                                    null -> {
-                                        Unit
+                                        null -> {
+                                            Unit
+                                        }
                                     }
                                 }
                             }
+                            ChatTitleSyncSpinner(timelineHistoryStatus)
+                            if (titleTarget != ChatTitleTarget.NONE) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
-                        ChatTitleSyncSpinner(timelineHistoryStatus)
-                        if (titleTarget != ChatTitleTarget.NONE) {
+                    },
+                    navigationIcon = {
+                        if (showBack) {
+                            IconButton(onClick = onBack) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = stringResource(R.string.chat_back),
+                                )
+                            }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                Icons.Outlined.Search,
+                                contentDescription = stringResource(R.string.chat_search),
                             )
                         }
-                    }
-                },
-                navigationIcon = {
-                    if (showBack) {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.chat_back),
-                            )
+                        IconButton(
+                            onClick = { overflowOpen = true },
+                            modifier = Modifier.testTag("chat_overflow"),
+                        ) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                         }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }) {
-                        Icon(
-                            Icons.Outlined.Search,
-                            contentDescription = stringResource(R.string.chat_search),
-                        )
-                    }
-                    IconButton(
-                        onClick = { overflowOpen = true },
-                        modifier = Modifier.testTag("chat_overflow"),
-                    ) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
-                    }
-                    DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
-                        DropdownMenuItem(
-                            modifier = Modifier.testTag("chat_layout_menu"),
-                            text = {
-                                Column {
-                                    Text(stringResource(R.string.chat_layout_title))
-                                    Text(
-                                        stringResource(
-                                            R.string.chat_layout_overflow_summary,
-                                            densityLabel(conversationLayout.effective),
-                                        ),
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            },
-                            onClick = {
-                                overflowOpen = false
-                                conversationLayoutSheetOpen = true
-                            },
-                        )
-                        DropdownMenuItem(
-                            modifier = Modifier.testTag("chat_presence_menu"),
-                            text = {
-                                Column {
-                                    Text(stringResource(R.string.chat_presence_title))
-                                    Text(
-                                        stringResource(
-                                            R.string.chat_presence_overflow_summary,
-                                            stringResource(presenceModeLabel(presenceMode)),
-                                        ),
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            },
-                            onClick = {
-                                overflowOpen = false
-                                presenceModeSheetOpen = true
-                            },
-                        )
-                        if (fools.isNotEmpty()) {
-                            val foolsShown =
-                                if (foolsMode == FoolsMode.HIDE) {
-                                    hiddenFoolsRevealed
-                                } else {
-                                    expandAllFools
-                                }
+                        DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
                             DropdownMenuItem(
-                                modifier = Modifier.testTag("chat_toggle_fools_visibility"),
+                                modifier = Modifier.testTag("chat_layout_menu"),
                                 text = {
-                                    Text(
-                                        stringResource(
-                                            if (foolsShown) {
-                                                R.string.chat_fool_collapse_all
-                                            } else {
-                                                R.string.chat_fool_expand_all
-                                            },
-                                        ),
-                                    )
+                                    Column {
+                                        Text(stringResource(R.string.chat_layout_title))
+                                        Text(
+                                            stringResource(
+                                                R.string.chat_layout_overflow_summary,
+                                                densityLabel(conversationLayout.effective),
+                                            ),
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
                                 },
                                 onClick = {
                                     overflowOpen = false
-                                    if (foolsMode == FoolsMode.HIDE) {
-                                        onHiddenFoolsRevealedChange(!hiddenFoolsRevealed)
-                                    } else {
-                                        expandAllFools = !expandAllFools
-                                        expandedFools = emptySet()
-                                        collapsedFools = emptySet()
-                                    }
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        if (foolsShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                        contentDescription = null,
-                                    )
+                                    conversationLayoutSheetOpen = true
                                 },
                             )
+                            DropdownMenuItem(
+                                modifier = Modifier.testTag("chat_presence_menu"),
+                                text = {
+                                    Column {
+                                        Text(stringResource(R.string.chat_presence_title))
+                                        Text(
+                                            stringResource(
+                                                R.string.chat_presence_overflow_summary,
+                                                stringResource(presenceModeLabel(presenceMode)),
+                                            ),
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    overflowOpen = false
+                                    presenceModeSheetOpen = true
+                                },
+                            )
+                            if (fools.isNotEmpty()) {
+                                val foolsShown =
+                                    if (foolsMode == FoolsMode.HIDE) {
+                                        hiddenFoolsRevealed
+                                    } else {
+                                        expandAllFools
+                                    }
+                                DropdownMenuItem(
+                                    modifier = Modifier.testTag("chat_toggle_fools_visibility"),
+                                    text = {
+                                        Text(
+                                            stringResource(
+                                                if (foolsShown) {
+                                                    R.string.chat_fool_collapse_all
+                                                } else {
+                                                    R.string.chat_fool_expand_all
+                                                },
+                                            ),
+                                        )
+                                    },
+                                    onClick = {
+                                        overflowOpen = false
+                                        if (foolsMode == FoolsMode.HIDE) {
+                                            onHiddenFoolsRevealedChange(!hiddenFoolsRevealed)
+                                        } else {
+                                            expandAllFools = !expandAllFools
+                                            expandedFools = emptySet()
+                                            collapsedFools = emptySet()
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (foolsShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                    },
+                )
+                if (accountSetupReminder) {
+                    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(stringResource(R.string.account_reminder_message), modifier = Modifier.weight(1f))
+                            TextButton(onClick = onDismissAccountSetup) { Text(stringResource(R.string.account_reminder_not_now)) }
+                            Button(onClick = onAccountSetup, modifier = Modifier.testTag("chat_account_setup")) {
+                                Text(stringResource(R.string.account_setup_title))
+                            }
                         }
                     }
-                },
-            )
+                }
+            }
         },
     ) { padding ->
         // TopAppBar owns the status-bar inset. The chat surface draws edge-to-edge horizontally,

@@ -6,12 +6,14 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.chatlist.DrawerRow
 import io.github.trevarj.motd.ui.chatlist.ServerDrawerContent
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -21,6 +23,7 @@ class ServerDrawerUiTest {
 
     @Test
     fun ircNetworkIcons_remainVisibleAcrossConnectionStates() {
+        var scanned = false
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ServerDrawerContent(
@@ -44,9 +47,13 @@ class ServerDrawerUiTest {
                     onToggleOffline = {},
                     onOpenSettings = {},
                     onMarkAllRead = {},
+                    onScanInvite = { scanned = true },
                 )
             }
         }
+
+        compose.onNodeWithTag("drawer_scan_invite").assertIsDisplayed().performClick()
+        assertTrue(scanned)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val expectedStates =

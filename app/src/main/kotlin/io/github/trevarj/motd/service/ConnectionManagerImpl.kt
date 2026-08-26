@@ -25,6 +25,7 @@ import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.sync.BufferStore
@@ -458,6 +459,7 @@ class ConnectionManagerImpl
         private val pushPrefs: PushPrefs,
         private val replyPrefs: ReplyPrefs,
         private val certStore: CertTrustStore,
+        private val inviteEnrollmentStore: InviteEnrollmentStore,
         private val baseTransportFactory: TransportFactory,
         private val localSocksProvider: LocalSocksProvider,
         private val historyResyncCoordinator: HistoryResyncCoordinator,
@@ -1730,10 +1732,11 @@ class ConnectionManagerImpl
             if (row.role == NetworkRole.DIRECT) {
                 for (channel in recoveryReader.joinedChannels(row.id)) {
                     if (!isCurrent()) return
+                    val key = inviteEnrollmentStore.channelKey(row.id, client.isupport.normalize(channel))
                     client.send(
                         io.github.trevarj.motd.irc.proto.IrcMessage(
                             command = "JOIN",
-                            params = listOf(channel),
+                            params = listOfNotNull(channel, key),
                         ),
                     )
                 }
@@ -2489,14 +2492,22 @@ class ConnectionManagerImpl
             networkId: Long,
             channel: String,
             key: String?,
-        ) {
-            val client = clientFor(networkId) ?: return
-            client.send(
-                io.github.trevarj.motd.irc.proto.IrcMessage(
-                    command = "JOIN",
-                    params = listOfNotNull(channel, key?.takeIf { it.isNotBlank() }),
-                ),
-            )
+        ): Boolean {
+            val client = clientFor(networkId) ?: return false
+            val normalizedChannel = client.isupport.normalize(channel)
+            val suppliedKey = key?.takeIf { it.isNotBlank() }
+            val effectiveKey = suppliedKey ?: inviteEnrollmentStore.channelKey(networkId, normalizedChannel)
+            val accepted =
+                client.sendIfConnected(
+                    io.github.trevarj.motd.irc.proto.IrcMessage(
+                        command = "JOIN",
+                        params = listOfNotNull(channel, effectiveKey),
+                    ),
+                )
+            if (accepted && suppliedKey != null) {
+                inviteEnrollmentStore.putChannelKey(networkId, normalizedChannel, suppliedKey)
+            }
+            return accepted
         }
 
         override suspend fun acceptInvite(messageId: Long) {
@@ -2652,7 +2663,16 @@ class ConnectionManagerImpl
             reason: String?,
         ): Boolean {
             val buffer = bufferDao.observeById(bufferId) ?: return false
-            return writeChannelPartIfReady(buffer, reason, clientFor(buffer.networkId))
+            val client = clientFor(buffer.networkId)
+            val accepted = writeChannelPartIfReady(buffer, reason, client)
+            if (accepted && client != null) {
+                inviteEnrollmentStore.putChannelKey(
+                    buffer.networkId,
+                    client.isupport.normalize(buffer.ircTarget),
+                    null,
+                )
+            }
+            return accepted
         }
 
         private suspend fun sendTopic(

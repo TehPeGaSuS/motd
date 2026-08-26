@@ -12,6 +12,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -69,6 +70,83 @@ class IrcClientTest {
     private fun responseLabel(line: String): String =
         checkNotNull(Regex("label=(motd-\\d+)").find(line)) { "missing response label in $line" }
             .groupValues[1]
+
+    @Test
+    fun `sensitive NickServ self echo is not published`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = IrcClient(config(), ft.factory(), clientScope())
+            client.start()
+            runCurrent()
+            ft.feed(":srv CAP * LS :echo-message")
+            runCurrent()
+            ft.feed(":srv CAP motd ACK :echo-message")
+            runCurrent()
+            ft.feed(":srv 001 motd :welcome")
+            runCurrent()
+            val observed = async { client.broadcastEvents.filterIsInstance<IrcEvent.ChatMessage>().first() }
+            runCurrent()
+            val secret = "REGISTER generated-secret me@example.org"
+
+            assertTrue(client.sendSensitivePrivmsg("NickServ", secret))
+            ft.feed(":motd!u@h PRIVMSG NickServ :$secret")
+            ft.feed(":alice!u@h PRIVMSG motd :ordinary")
+
+            assertEquals("ordinary", observed.await().text)
+        }
+
+    @Test
+    fun `draft account registration reports success and verification`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = IrcClient(config(), ft.factory(), clientScope())
+            client.start()
+            runCurrent()
+            val cap = "draft/account-registration=email-required,min-password-length=16,max-password-length=64 standard-replies"
+            ft.feed(":srv CAP * LS :$cap")
+            runCurrent()
+            ft.feed(":srv CAP motd ACK :$cap")
+            runCurrent()
+            ft.feed(":srv 001 motd :welcome")
+            runCurrent()
+
+            assertEquals(true, client.accountRegistrationPolicy?.emailRequired)
+            val registering = async { client.registerAccount("*", "me@example.org", "0123456789abcdef") }
+            runCurrent()
+            assertTrue(ft.sent.last().startsWith("REGISTER * me@example.org "))
+            ft.feed(":srv REGISTER VERIFICATION_REQUIRED motd :check email")
+            assertEquals(
+                AccountRegistrationResult.VerificationRequired("motd", "check email"),
+                registering.await(),
+            )
+
+            val verifying = async { client.verifyAccount("motd", "code") }
+            runCurrent()
+            ft.feed(":srv VERIFY SUCCESS motd :done")
+            assertEquals(AccountRegistrationResult.Success("motd", "done"), verifying.await())
+        }
+
+    @Test
+    fun `draft account registration surfaces standard failure without password text`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = IrcClient(config(), ft.factory(), clientScope())
+            client.start()
+            runCurrent()
+            val cap = "draft/account-registration standard-replies"
+            ft.feed(":srv CAP * LS :$cap")
+            runCurrent()
+            ft.feed(":srv CAP motd ACK :$cap")
+            runCurrent()
+            ft.feed(":srv 001 motd :welcome")
+            runCurrent()
+            val result = async { runCatching { client.registerAccount("*", null, "never-log-this-password") } }
+            runCurrent()
+            ft.feed(":srv FAIL REGISTER ACCOUNT_EXISTS motd :already exists")
+            val error = result.await().exceptionOrNull() as IrcCommandException
+            assertEquals("ACCOUNT_EXISTS", error.code)
+            assertFalse(error.message.orEmpty().contains("never-log"))
+        }
 
     @Test
     fun `disconnected chat send reports no transport acceptance`() =

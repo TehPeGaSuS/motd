@@ -38,6 +38,14 @@ asset, `SHA256SUMS`, the project `LICENSE`, and a rendered release-specific copy
 of this notice. The rendered notice records the archive's actual release URL
 and SHA-256; use that copy as the provenance record for a particular APK.
 
+## QR encoding: ZXing
+
+QR invitation generation and decoding use
+[ZXing Core 3.5.4](https://github.com/zxing/zxing/releases/tag/zxing-3.5.4),
+copyright ZXing authors, licensed under the Apache License 2.0. Camera frames
+remain on-device; no ZXing Android application or remote scanning service is
+bundled.
+
 ## Brand lettering: Roboto
 
 The outlined lettering in the motd wordmark and lockups is derived from Roboto

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -29,6 +30,7 @@ fun NetworksSettingsScreen(
     onBack: () -> Unit = {},
     onOpenNetwork: (Long) -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
+    onScanInvite: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -38,6 +40,7 @@ fun NetworksSettingsScreen(
         onBack = onBack,
         onOpenNetwork = onOpenNetwork,
         onOpenAddNetwork = onOpenAddNetwork,
+        onScanInvite = onScanInvite,
     )
 }
 
@@ -48,6 +51,7 @@ fun NetworksSettingsContent(
     onBack: () -> Unit,
     onOpenNetwork: (Long) -> Unit,
     onOpenAddNetwork: () -> Unit,
+    onScanInvite: () -> Unit = {},
 ) {
     SettingsScaffold(title = stringResource(R.string.settings_networks), onBack = onBack) {
         FilledTonalButton(
@@ -56,6 +60,13 @@ fun NetworksSettingsContent(
         ) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
             Text(stringResource(R.string.add_network_title))
+        }
+        FilledTonalButton(
+            onClick = onScanInvite,
+            modifier = Modifier.fillMaxWidth().testTag("settings_scan_invite"),
+        ) {
+            Icon(Icons.Filled.QrCodeScanner, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+            Text(stringResource(R.string.invite_scan_title))
         }
         val organized = organizeNetworks(networks, zncNetworkIds)
         if (organized.bouncerRoots.isNotEmpty()) {

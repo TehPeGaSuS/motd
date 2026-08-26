@@ -13,6 +13,21 @@ import kotlinx.serialization.Serializable
 
 @Serializable data object OnboardingRoute
 
+@Serializable data object QrInviteScannerRoute
+
+@Serializable data class JoinInviteRoute(
+    val payload: String,
+)
+
+@Serializable data class CreateInviteRoute(
+    val bufferId: Long,
+)
+
+@Serializable data class AccountSetupRoute(
+    val networkId: Long,
+    val returnChannel: String? = null,
+)
+
 @Serializable data object AboutRoute
 
 @Serializable data object SettingsRoute

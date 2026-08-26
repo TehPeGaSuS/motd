@@ -35,6 +35,7 @@ import io.github.trevarj.motd.bouncer.BouncerServSessionProvider
 import io.github.trevarj.motd.bouncer.ConnectionBouncerServSessionProvider
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepository
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepositoryImpl
+import io.github.trevarj.motd.data.prefs.AccountReminderStore
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
@@ -45,6 +46,8 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefsImpl
+import io.github.trevarj.motd.data.prefs.InviteEnrollmentCleanup
+import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.OnboardingPrefsImpl
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
@@ -156,6 +159,12 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun onboardingPrefs(impl: OnboardingPrefsImpl): OnboardingPrefs
+
+    @Binds @Singleton
+    abstract fun inviteEnrollmentCleanup(impl: InviteEnrollmentStore): InviteEnrollmentCleanup
+
+    @Binds @Singleton
+    abstract fun accountReminderStore(impl: InviteEnrollmentStore): AccountReminderStore
 
     @Binds @Singleton
     abstract fun historyResyncController(impl: HistoryResyncCoordinator): HistoryResyncController

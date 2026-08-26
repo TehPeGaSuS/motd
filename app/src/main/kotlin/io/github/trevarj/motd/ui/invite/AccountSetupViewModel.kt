@@ -1,0 +1,386 @@
+package io.github.trevarj.motd.ui.invite
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.AccountEnrollmentDraft
+import io.github.trevarj.motd.data.prefs.AccountEnrollmentPhase
+import io.github.trevarj.motd.data.prefs.AccountEnrollmentProvider
+import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
+import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.irc.client.AccountRegistrationResult
+import io.github.trevarj.motd.irc.client.IrcCommandException
+import io.github.trevarj.motd.irc.client.SaslMechanism
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.isDirectLiberaEndpoint
+import io.github.trevarj.motd.ui.settings.sanitizeNickInput
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.dropWhile
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.security.SecureRandom
+import java.util.Base64
+import javax.inject.Inject
+
+private const val ACCOUNT_READY_TIMEOUT_MS = 30_000L
+private const val NICKSERV_REPLY_TIMEOUT_MS = 15_000L
+
+enum class AccountSetupPhase { FORM, SUBMITTING, VERIFY, ACTIVATING, SUCCESS, FAILED, UNSUPPORTED }
+
+data class AccountSetupUiState(
+    val phase: AccountSetupPhase = AccountSetupPhase.FORM,
+    val network: NetworkEntity? = null,
+    val provider: AccountEnrollmentProvider? = null,
+    val account: String = "",
+    val email: String = "",
+    val emailRequired: Boolean = false,
+    val verification: String = "",
+    val serverMessage: String? = null,
+    val error: String? = null,
+)
+
+sealed interface AccountSetupEvent {
+    data object Complete : AccountSetupEvent
+}
+
+@HiltViewModel
+class AccountSetupViewModel
+    @Inject
+    constructor(
+        private val networks: NetworkRepository,
+        private val connections: ConnectionManager,
+        private val enrollment: InviteEnrollmentStore,
+    ) : ViewModel() {
+        private val _state = MutableStateFlow(AccountSetupUiState())
+        val state: StateFlow<AccountSetupUiState> = _state.asStateFlow()
+        private val _events = MutableSharedFlow<AccountSetupEvent>(extraBufferCapacity = 1)
+        val events: SharedFlow<AccountSetupEvent> = _events.asSharedFlow()
+        private var networkId: Long = 0
+        private var initialized = false
+
+        fun init(networkId: Long) {
+            if (initialized) return
+            initialized = true
+            this.networkId = networkId
+            viewModelScope.launch {
+                val network = networks.networkById(networkId)
+                val draft = enrollment.accountDraft(networkId)
+                val resumingActivation = draft?.phase == AccountEnrollmentPhase.ACTIVATING
+                if (network == null || network.role != NetworkRole.DIRECT || !network.tls ||
+                    (network.saslMechanism != SaslMechanism.NONE.name && !resumingActivation)
+                ) {
+                    _state.value = AccountSetupUiState(phase = AccountSetupPhase.UNSUPPORTED, error = "Account setup requires an unauthenticated direct TLS network")
+                    return@launch
+                }
+                var client = connections.clientFor(networkId)
+                if (client == null && !resumingActivation) {
+                    connections.connect(networkId)
+                    withTimeoutOrNull(ACCOUNT_READY_TIMEOUT_MS) {
+                        connections.connectionStates
+                            .map { it[networkId] }
+                            .filter { it is IrcClientState.Ready }
+                            .first()
+                    }
+                    client = connections.clientFor(networkId)
+                }
+                val provider =
+                    draft?.provider ?: when {
+                        network.isDirectLiberaEndpoint() -> AccountEnrollmentProvider.LIBERA
+                        client?.accountRegistrationPolicy != null -> AccountEnrollmentProvider.IRCV3
+                        else -> null
+                    }
+                if (provider == null) {
+                    _state.value = AccountSetupUiState(phase = AccountSetupPhase.UNSUPPORTED, network = network, error = "This server does not advertise account registration")
+                    return@launch
+                }
+                val readyNick = (connections.connectionStates.value[networkId] as? IrcClientState.Ready)?.nick ?: network.nick
+                _state.value =
+                    AccountSetupUiState(
+                        phase = if (draft?.phase == AccountEnrollmentPhase.AWAITING_VERIFICATION) AccountSetupPhase.VERIFY else AccountSetupPhase.FORM,
+                        network = network,
+                        provider = provider,
+                        account = draft?.account ?: readyNick,
+                        email = draft?.email.orEmpty(),
+                        emailRequired = provider == AccountEnrollmentProvider.LIBERA || client?.accountRegistrationPolicy?.emailRequired == true,
+                    )
+                if (draft?.phase == AccountEnrollmentPhase.ACTIVATING) activate(draft)
+            }
+        }
+
+        fun editAccount(value: String) {
+            _state.value = _state.value.copy(account = value, error = null)
+        }
+
+        fun editEmail(value: String) {
+            _state.value = _state.value.copy(email = value, error = null)
+        }
+
+        fun editVerification(value: String) {
+            _state.value = _state.value.copy(verification = value, error = null)
+        }
+
+        fun submit() {
+            val state = _state.value
+            val network = state.network ?: return
+            val provider = state.provider ?: return
+            val account = sanitizeNickInput(state.account)
+            if (account == null) {
+                fail("Choose a valid account nickname")
+                return
+            }
+            val email = state.email.trim().takeIf(String::isNotEmpty)
+            if ((state.emailRequired || email != null) && !validEmail(email)) {
+                fail("Enter a valid recovery email")
+                return
+            }
+            viewModelScope.launch {
+                var resumedDraft: AccountEnrollmentDraft? = null
+                try {
+                    val currentNick = (connections.connectionStates.value[networkId] as? IrcClientState.Ready)?.nick ?: network.nick
+                    val effectiveAccount = if (currentNick != account) reconnectWithNick(network, account) else currentNick
+                    val existingDraft = enrollment.accountDraft(networkId)
+                    val draft =
+                        existingDraft?.takeIf {
+                            it.phase == AccountEnrollmentPhase.PREPARED && it.provider == provider && it.account == effectiveAccount && it.email == email
+                        } ?: AccountEnrollmentDraft(networkId, provider, effectiveAccount, email, generatePassword(provider))
+                    if (draft === existingDraft) resumedDraft = draft
+                    enrollment.putAccountDraft(draft)
+                    _state.value = _state.value.copy(phase = AccountSetupPhase.SUBMITTING, account = effectiveAccount, error = null)
+                    when (provider) {
+                        AccountEnrollmentProvider.IRCV3 -> registerIrcv3(draft)
+                        AccountEnrollmentProvider.LIBERA -> registerLibera(draft, resumed = resumedDraft != null)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: IrcCommandException) {
+                    if (error.code == "ACCOUNT_EXISTS" && resumedDraft?.provider == AccountEnrollmentProvider.IRCV3) {
+                        activate(requireNotNull(resumedDraft))
+                    } else {
+                        fail(error.message ?: error.code)
+                    }
+                } catch (error: Exception) {
+                    fail(error.message ?: "Account registration failed")
+                }
+            }
+        }
+
+        fun verify() {
+            val raw = _state.value.verification
+            viewModelScope.launch {
+                val draft =
+                    enrollment.accountDraft(networkId) ?: run {
+                        fail("Registration details expired; start again")
+                        return@launch
+                    }
+                val code =
+                    parseVerification(raw, draft) ?: run {
+                        fail("Paste the verification code or exact verification command")
+                        return@launch
+                    }
+                _state.value = _state.value.copy(phase = AccountSetupPhase.SUBMITTING, error = null)
+                try {
+                    when (draft.provider) {
+                        AccountEnrollmentProvider.IRCV3 -> {
+                            val result = connections.clientFor(networkId)?.verifyAccount(draft.account, code) ?: error("Connection unavailable")
+                            if (result is AccountRegistrationResult.Success) {
+                                activate(draft)
+                            } else {
+                                fail((result as AccountRegistrationResult.VerificationRequired).message)
+                            }
+                        }
+
+                        AccountEnrollmentProvider.LIBERA -> {
+                            val response = sendNickServ("VERIFY REGISTER ${draft.account} $code")
+                            _state.value = _state.value.copy(serverMessage = response)
+                            activate(draft)
+                        }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    fail(error.message ?: "Verification failed")
+                }
+            }
+        }
+
+        fun retry() {
+            _state.value = _state.value.copy(phase = AccountSetupPhase.FORM, error = null)
+        }
+
+        fun dismissReminder() {
+            viewModelScope.launch { enrollment.setAccountReminder(networkId, false) }
+        }
+
+        private suspend fun registerIrcv3(draft: AccountEnrollmentDraft) {
+            val client = connections.clientFor(networkId) ?: error("Connection unavailable")
+            when (val result = client.registerAccount("*", draft.email, draft.password)) {
+                is AccountRegistrationResult.Success -> {
+                    _state.value = _state.value.copy(serverMessage = result.message)
+                    activate(draft.copy(account = result.account))
+                }
+
+                is AccountRegistrationResult.VerificationRequired -> {
+                    val pending = draft.copy(account = result.account, phase = AccountEnrollmentPhase.AWAITING_VERIFICATION)
+                    enrollment.putAccountDraft(pending)
+                    _state.value = _state.value.copy(phase = AccountSetupPhase.VERIFY, serverMessage = result.message)
+                }
+            }
+        }
+
+        private suspend fun registerLibera(
+            draft: AccountEnrollmentDraft,
+            resumed: Boolean,
+        ) {
+            val response = sendNickServ("REGISTER ${draft.password} ${draft.email}")
+            if (response.contains("already registered", ignoreCase = true) || response.contains("cannot be registered", ignoreCase = true)) {
+                if (!resumed) {
+                    fail(response)
+                    return
+                }
+            }
+            val pending = draft.copy(phase = AccountEnrollmentPhase.AWAITING_VERIFICATION)
+            enrollment.putAccountDraft(pending)
+            _state.value = _state.value.copy(phase = AccountSetupPhase.VERIFY, serverMessage = response)
+        }
+
+        private suspend fun sendNickServ(body: String): String =
+            coroutineScope {
+                val client = connections.clientFor(networkId) ?: error("Connection unavailable")
+                val response =
+                    async(start = CoroutineStart.UNDISPATCHED) {
+                        client.broadcastEvents
+                            .filter {
+                                it is IrcEvent.ChatMessage &&
+                                    it.source.nick.equals("NickServ", ignoreCase = true)
+                            }.map { (it as IrcEvent.ChatMessage).text }
+                            .first()
+                    }
+                if (!client.sendSensitivePrivmsg("NickServ", body)) {
+                    response.cancel()
+                    error("Connection unavailable")
+                }
+                withTimeoutOrNull(NICKSERV_REPLY_TIMEOUT_MS) { response.await() }
+                    ?: "NickServ did not answer in time. Check the NickServ conversation before retrying."
+            }
+
+        private suspend fun activate(draft: AccountEnrollmentDraft) {
+            val network = networks.networkById(networkId) ?: error("Network no longer exists")
+            val guestNetwork =
+                network.copy(
+                    saslMechanism = SaslMechanism.NONE.name,
+                    saslUser = null,
+                    saslPassword = null,
+                )
+            enrollment.putAccountDraft(draft.copy(phase = AccountEnrollmentPhase.ACTIVATING))
+            _state.value = _state.value.copy(phase = AccountSetupPhase.ACTIVATING, error = null)
+            val wasAlreadyActivated = network.saslMechanism == SaslMechanism.PLAIN.name
+            val activated =
+                network.copy(
+                    nick = draft.account,
+                    saslMechanism = SaslMechanism.PLAIN.name,
+                    saslUser = draft.account,
+                    saslPassword = draft.password,
+                    nickServPassword = null,
+                    nickServRecoveryEnabled = false,
+                )
+            networks.updateNetwork(activated)
+            connections.connect(networkId)
+            val result =
+                if (wasAlreadyActivated && connections.connectionStates.value[networkId] is IrcClientState.Ready) {
+                    connections.connectionStates.value[networkId]
+                } else {
+                    withTimeoutOrNull(ACCOUNT_READY_TIMEOUT_MS) {
+                        connections.connectionStates
+                            .map { it[networkId] }
+                            .dropWhile { it is IrcClientState.Ready }
+                            .filter { it is IrcClientState.Ready || it is IrcClientState.Failed }
+                            .first()
+                    }
+                }
+            if (result is IrcClientState.Ready) {
+                enrollment.clearAccountDraft(networkId)
+                enrollment.setAccountReminder(networkId, false)
+                _state.value = _state.value.copy(phase = AccountSetupPhase.SUCCESS, network = activated)
+                _events.emit(AccountSetupEvent.Complete)
+            } else {
+                networks.updateNetwork(guestNetwork)
+                connections.connect(networkId)
+                val reason = (result as? IrcClientState.Failed)?.reason ?: "Account login timed out"
+                if (reason.contains("SASL", ignoreCase = true)) {
+                    enrollment.putAccountDraft(draft.copy(phase = AccountEnrollmentPhase.AWAITING_VERIFICATION))
+                    _state.value = _state.value.copy(phase = AccountSetupPhase.VERIFY, error = reason)
+                } else {
+                    fail(reason)
+                }
+            }
+        }
+
+        private suspend fun reconnectWithNick(
+            network: NetworkEntity,
+            account: String,
+        ): String {
+            networks.updateNetwork(network.copy(nick = account, username = account))
+            connections.connect(networkId)
+            val ready =
+                withTimeoutOrNull(ACCOUNT_READY_TIMEOUT_MS) {
+                    connections.connectionStates
+                        .map { it[networkId] }
+                        .dropWhile { it is IrcClientState.Ready }
+                        .filter { it is IrcClientState.Ready }
+                        .first()
+                } ?: error("Could not connect with that nickname")
+            val actualNick = (ready as IrcClientState.Ready).nick
+            _state.value = _state.value.copy(account = actualNick)
+            return actualNick
+        }
+
+        private fun generatePassword(provider: AccountEnrollmentProvider): String {
+            val policy = if (provider == AccountEnrollmentProvider.IRCV3) connections.clientFor(networkId)?.accountRegistrationPolicy else null
+            val max = policy?.maxPasswordLength ?: 300
+            if (max < 16) error("Server password maximum is below motd's 16-character safety minimum")
+            val min = maxOf(16, policy?.minPasswordLength ?: 0)
+            if (min > max) error("Server password bounds are inconsistent")
+            val base = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(24).also(SecureRandom()::nextBytes))
+            return if (base.length > max) base.take(max) else base.padEnd(min, 'A')
+        }
+
+        private fun fail(message: String) {
+            _state.value = _state.value.copy(phase = AccountSetupPhase.FAILED, error = message)
+        }
+    }
+
+internal fun validEmail(value: String?): Boolean = value != null && value.length <= 254 && '@' in value && value.none { it.isWhitespace() || it.isISOControl() }
+
+internal fun parseVerification(
+    raw: String,
+    draft: AccountEnrollmentDraft,
+): String? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty() || trimmed.any(Char::isISOControl)) return null
+    if (' ' !in trimmed) return trimmed.takeIf { it.length <= 300 }
+    val parts = trimmed.removePrefix("/").split(Regex("\\s+"))
+    val command =
+        when {
+            parts.size == 6 && parts[0].equals("msg", true) && parts[1].equals("NickServ", true) -> parts.drop(2)
+            parts.size == 4 -> parts
+            else -> return null
+        }
+    if (!command[0].equals("VERIFY", true) || !command[1].equals("REGISTER", true) || command[2] != draft.account) return null
+    return command[3].takeIf { it.isNotEmpty() && it.length <= 300 }
+}

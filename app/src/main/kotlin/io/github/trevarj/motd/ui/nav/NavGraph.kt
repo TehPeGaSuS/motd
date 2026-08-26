@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -26,6 +27,10 @@ import io.github.trevarj.motd.ui.channellist.ChannelListScreen
 import io.github.trevarj.motd.ui.chat.ChatScreen
 import io.github.trevarj.motd.ui.chatlist.ChatListScreen
 import io.github.trevarj.motd.ui.imageviewer.ImageViewerScreen
+import io.github.trevarj.motd.ui.invite.AccountSetupScreen
+import io.github.trevarj.motd.ui.invite.CreateInviteScreen
+import io.github.trevarj.motd.ui.invite.JoinInviteScreen
+import io.github.trevarj.motd.ui.invite.QrInviteScannerScreen
 import io.github.trevarj.motd.ui.onboarding.OnboardingScreen
 import io.github.trevarj.motd.ui.search.SearchScreen
 import io.github.trevarj.motd.ui.settings.AppearanceSettingsScreen
@@ -67,6 +72,9 @@ fun MotdNavGraph(
     // Inbound ACTION_SEND payload: route to the chat picker. Null when absent.
     pendingShare: PendingShare? = null,
     onPendingShareHandled: () -> Unit = {},
+    // External motd://invite payload, already syntax-validated by MainActivity. Empty renders error.
+    pendingJoinInvite: String? = null,
+    onPendingJoinInviteHandled: () -> Unit = {},
 ) {
     // Route a notification tap to ChatRoute so the existing jump path (local resolve → CHATHISTORY
     // AROUND fallback) scrolls to and highlights the message. Runs for both cold start (target
@@ -94,6 +102,11 @@ fun MotdNavGraph(
         if (pendingShare == null) return@LaunchedEffect
         navController.navigate(SharePickerRoute) { launchSingleTop = true }
         onPendingShareHandled()
+    }
+    LaunchedEffect(pendingJoinInvite) {
+        val payload = pendingJoinInvite ?: return@LaunchedEffect
+        navController.navigate(JoinInviteRoute(payload)) { launchSingleTop = true }
+        onPendingJoinInviteHandled()
     }
     NavHost(
         navController = navController,
@@ -140,6 +153,7 @@ fun MotdNavGraph(
                 listPane = { twoPane ->
                     ChatListPane(
                         navController = navController,
+                        suppressOnboarding = pendingJoinInvite != null,
                         onDefaultBufferAvailable = { bufferId ->
                             if (twoPane && !openedDefault) {
                                 openedDefault = true
@@ -186,6 +200,7 @@ fun MotdNavGraph(
                                 )
                             },
                             onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
+                            onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
                         )
                     }
                 },
@@ -195,12 +210,56 @@ fun MotdNavGraph(
             // Finish lands on a fresh ChatList and clears onboarding (plus any duplicate
             // onboarding entries) from the backstack; a bare popBackStack could fall back to
             // the Welcome step instead of the chat list.
-            OnboardingScreen(onDone = {
-                navController.navigate(ChatListRoute) {
-                    popUpTo<ChatListRoute> { inclusive = true }
-                    launchSingleTop = true
-                }
-            })
+            OnboardingScreen(
+                onDone = {
+                    navController.navigate(ChatListRoute) {
+                        popUpTo<ChatListRoute> { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+                onScanInvite = { navController.navigate(QrInviteScannerRoute) },
+            )
+        }
+        composable<QrInviteScannerRoute> {
+            QrInviteScannerScreen(
+                onBack = { navController.popBackStack() },
+                onInvite = { payload ->
+                    navController.navigate(JoinInviteRoute(payload)) {
+                        popUpTo<QrInviteScannerRoute> { inclusive = true }
+                    }
+                },
+            )
+        }
+        composable<JoinInviteRoute> { entry ->
+            val route = entry.toRoute<JoinInviteRoute>()
+            val accountComplete by entry.savedStateHandle.getStateFlow("account_setup_complete", false).collectAsStateWithLifecycle()
+            JoinInviteScreen(
+                payload = route.payload,
+                accountSetupComplete = accountComplete,
+                onAccountSetupCompleteHandled = { entry.savedStateHandle["account_setup_complete"] = false },
+                onBack = { navController.popBackStack() },
+                onOpenBuffer = { bufferId ->
+                    navController.navigate(ChatRoute(bufferId)) {
+                        popUpTo<JoinInviteRoute> { inclusive = true }
+                    }
+                },
+                onOpenAccountSetup = { networkId, channel ->
+                    navController.navigate(AccountSetupRoute(networkId, channel))
+                },
+            )
+        }
+        composable<AccountSetupRoute> { entry ->
+            val route = entry.toRoute<AccountSetupRoute>()
+            AccountSetupScreen(
+                networkId = route.networkId,
+                onBack = { navController.popBackStack() },
+                onComplete = {
+                    if (route.returnChannel != null) {
+                        navController.previousBackStackEntry?.savedStateHandle?.set("account_setup_complete", true)
+                    }
+                    navController.popBackStack()
+                },
+            )
         }
         composable<SettingsRoute> {
             // Top-level Settings: category rows opening the focused sub-screens below.
@@ -240,6 +299,7 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
                 onOpenNetwork = { navController.navigate(NetworkSettingsRoute(it)) },
                 onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
+                onScanInvite = { navController.navigate(QrInviteScannerRoute) },
             )
         }
         composable<BackupRestoreRoute> {
@@ -272,6 +332,7 @@ fun MotdNavGraph(
                 onOpenBouncerNetworks = { navController.navigate(BouncerNetworksRoute(it)) },
                 onOpenBuffer = { navController.navigate(ChatRoute(it)) },
                 onOpenNetworkTools = { navController.navigate(NetworkToolsRoute(it)) },
+                onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
             )
         }
         composable<NetworkToolsRoute> { entry ->
@@ -298,6 +359,14 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
                 // Member "Message" action opens the DM's QUERY buffer.
                 onOpenBuffer = { navController.navigate(ChatRoute(it)) },
+                onCreateInvite = { navController.navigate(CreateInviteRoute(it)) },
+            )
+        }
+        composable<CreateInviteRoute> { entry ->
+            val route = entry.toRoute<CreateInviteRoute>()
+            CreateInviteScreen(
+                bufferId = route.bufferId,
+                onBack = { navController.popBackStack() },
             )
         }
         composable<ImageViewerRoute>(
@@ -328,6 +397,7 @@ fun MotdNavGraph(
         composable<AddNetworkRoute> {
             AddNetworkScreen(
                 onBack = { navController.popBackStack() },
+                onScanInvite = { navController.navigate(QrInviteScannerRoute) },
                 onOpenBouncerNetworks = { rootId ->
                     navController.navigate(BouncerNetworksRoute(rootId)) {
                         // The add-flow is replaced by the manager once the soju root exists.
@@ -358,6 +428,7 @@ private fun ChatListPane(
     navController: NavHostController,
     selectedBufferId: Long? = null,
     replaceCurrentChat: Boolean = false,
+    suppressOnboarding: Boolean = false,
     onDefaultBufferAvailable: (Long) -> Unit = {},
 ) {
     ChatListScreen(
@@ -380,8 +451,10 @@ private fun ChatListPane(
         onOpenOnboarding = { navController.navigate(OnboardingRoute) },
         onOpenNetworkSettings = { navController.navigate(NetworkSettingsRoute(it)) },
         onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
+        onScanInvite = { navController.navigate(QrInviteScannerRoute) },
         onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
         selectedBufferId = selectedBufferId,
+        suppressOnboarding = suppressOnboarding,
         onDefaultBufferAvailable = onDefaultBufferAvailable,
     )
 }

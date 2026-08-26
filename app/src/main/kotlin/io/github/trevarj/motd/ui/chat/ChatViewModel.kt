@@ -30,9 +30,11 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.prefs.AccountReminderStore
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.NoopAccountReminderStore
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
@@ -256,6 +258,7 @@ class ChatViewModel
         private val gapFiller: HistoryGapFiller = NoopHistoryGapFiller,
         private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
         private val avatarController: AvatarController = NoopAvatarController,
+        private val accountReminderStore: AccountReminderStore = NoopAccountReminderStore,
         // The app's own decision journal, handed to the screen so the timeline's Paging generations can
         // be journalled alongside the history-fetch decisions that cause them. Public because the
         // consumer is the composable, not this class; Noop default for hand-built call sites, as
@@ -951,6 +954,17 @@ class ChatViewModel
             }.combine(conversationPresence) { current, presence ->
                 current.copy(conversationPresence = presence)
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatState())
+
+        val accountSetupReminder: StateFlow<Boolean> =
+            combine(state, accountReminderStore.accountReminders) { chat, ids ->
+                chat.buffer?.networkId in ids
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+        fun dismissAccountSetupReminder() {
+            state.value.buffer?.networkId?.let { networkId ->
+                viewModelScope.launch { accountReminderStore.setAccountReminder(networkId, false) }
+            }
+        }
 
         /** Persist to the canonical id captured at the time of selection; Room then drives the UI. */
         fun setConversationLayoutOverride(override: LayoutDensity?) =

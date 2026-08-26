@@ -60,15 +60,19 @@ data class PresenceKey(
 )
 
 /** Ephemeral, target-keyed server rejection for a browser-initiated JOIN. */
+enum class ChannelJoinRejectionKind { INVITE_ONLY, BAD_KEY, ACCOUNT_REQUIRED, OTHER }
+
 sealed interface ChannelJoinOutcome {
     data class Rejected(
         val networkId: Long,
         val channel: String,
         val reason: String,
+        val code: String,
+        val kind: ChannelJoinRejectionKind,
     ) : ChannelJoinOutcome
 }
 
-private val JOIN_FAILURE_NUMERICS = setOf("403", "405", "471", "473", "474", "475", "476")
+private val JOIN_FAILURE_NUMERICS = setOf("403", "405", "471", "473", "474", "475", "476", "477")
 
 /** Extracts only JOIN-specific numeric and IRCv3 FAIL replies; unrelated server errors stay inert. */
 internal fun channelJoinOutcome(
@@ -76,11 +80,11 @@ internal fun channelJoinOutcome(
     event: IrcEvent,
     identityRules: IrcIdentityRules,
 ): ChannelJoinOutcome.Rejected? {
-    val (params, reason) =
+    val (params, reason, code) =
         when (event) {
             is IrcEvent.ServerError -> {
                 if (event.code in JOIN_FAILURE_NUMERICS) {
-                    event.params to event.text.ifBlank { event.code }
+                    Triple(event.params, event.text.ifBlank { event.code }, event.code)
                 } else {
                     return null
                 }
@@ -92,7 +96,7 @@ internal fun channelJoinOutcome(
                 ) {
                     return null
                 }
-                event.context to event.description.ifBlank { event.code }
+                Triple(event.context, event.description.ifBlank { event.code }, event.code)
             }
 
             else -> {
@@ -100,7 +104,25 @@ internal fun channelJoinOutcome(
             }
         }
     val channel = params.firstOrNull(identityRules::isChannel) ?: return null
-    return ChannelJoinOutcome.Rejected(networkId, channel, reason)
+    val kind =
+        when {
+            code == "473" -> {
+                ChannelJoinRejectionKind.INVITE_ONLY
+            }
+
+            code == "475" -> {
+                ChannelJoinRejectionKind.BAD_KEY
+            }
+
+            code == "477" || code.contains("ACCOUNT_REQUIRED", ignoreCase = true) -> {
+                ChannelJoinRejectionKind.ACCOUNT_REQUIRED
+            }
+
+            else -> {
+                ChannelJoinRejectionKind.OTHER
+            }
+        }
+    return ChannelJoinOutcome.Rejected(networkId, channel, reason, code, kind)
 }
 
 internal fun rosterStateAfterNames(explicitRefreshInFlight: Boolean): RosterLoadState = if (explicitRefreshInFlight) RosterLoadState.LOADING else RosterLoadState.LOADED
@@ -238,7 +260,7 @@ interface ConnectionManager {
         networkId: Long,
         channel: String,
         key: String? = null,
-    )
+    ): Boolean
 
     /** Atomically claim a persisted invitation, connect if needed, then send exactly one JOIN. */
     suspend fun acceptInvite(messageId: Long)

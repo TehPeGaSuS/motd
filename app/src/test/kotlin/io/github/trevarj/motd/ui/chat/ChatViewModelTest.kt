@@ -3559,8 +3559,9 @@ class ChatViewModelTest {
             networkId: Long,
             channel: String,
             key: String?,
-        ) {
+        ): Boolean {
             joins += Triple(networkId, channel, key)
+            return true
         }
 
         override suspend fun partChannel(

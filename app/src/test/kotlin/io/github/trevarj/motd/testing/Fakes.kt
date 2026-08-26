@@ -88,7 +88,7 @@ internal open class NoopConnectionManager(
         networkId: Long,
         channel: String,
         key: String?,
-    ) = Unit
+    ) = true
 
     override suspend fun acceptInvite(messageId: Long) = Unit
 

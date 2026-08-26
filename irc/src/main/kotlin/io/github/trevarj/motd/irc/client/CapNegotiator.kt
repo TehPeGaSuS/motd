@@ -48,6 +48,7 @@ internal object CapTiers {
             "draft/relaymsg",
             "draft/pre-away",
             "draft/channel-rename",
+            ACCOUNT_REGISTRATION_CAP,
             "soju.im/bouncer-networks",
             "soju.im/bouncer-networks-notify",
             "soju.im/webpush",

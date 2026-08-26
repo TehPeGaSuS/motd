@@ -26,6 +26,19 @@ class ChannelJoinOutcomeTest {
     }
 
     @Test
+    fun `477 classifies account required`() {
+        val outcome =
+            channelJoinOutcome(
+                networkId = 7,
+                event = IrcEvent.ServerError("477", listOf("me", "#registered"), "Log in first"),
+                identityRules = IrcIdentityRules(),
+            ) as ChannelJoinOutcome.Rejected
+
+        assertEquals(ChannelJoinRejectionKind.ACCOUNT_REQUIRED, outcome.kind)
+        assertEquals("477", outcome.code)
+    }
+
+    @Test
     fun `ircv3 fail join produces a target keyed rejection`() {
         val outcome =
             channelJoinOutcome(

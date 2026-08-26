@@ -306,6 +306,12 @@ dependencies {
     // Three hand-authored bodymovin assets in res/raw carry motion that Compose specs cannot draw
     // (stroke trim draw-on). Runtime-only: no new networking, and colors stay theme-driven.
     implementation(libs.lottie.compose)
+    // QR invite generation/decoding stays entirely on-device. CameraX supplies only preview/frame capture.
+    implementation(libs.zxing.core)
+    implementation(libs.camera.core)
+    implementation(libs.camera.camera2)
+    implementation(libs.camera.lifecycle)
+    implementation(libs.camera.view)
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)
     implementation(libs.coil.video)

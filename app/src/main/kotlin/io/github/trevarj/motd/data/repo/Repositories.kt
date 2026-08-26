@@ -125,6 +125,12 @@ interface BufferRepository {
     /** Normalized CHANNEL names confirmed by EventProcessor self-JOIN persistence. */
     fun observeJoinedChannelNames(networkId: Long): Flow<Set<String>> = flowOf(emptySet())
 
+    /** Joined channel produced by EventProcessor after an authoritative self-JOIN. */
+    suspend fun joinedBufferId(
+        networkId: Long,
+        normalizedChannel: String,
+    ): Long? = null
+
     fun observeBuffer(id: Long): Flow<BufferEntity?>
 
     fun observeMembers(bufferId: Long): Flow<List<MemberEntity>>

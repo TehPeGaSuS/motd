@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.DoneAll
@@ -107,6 +108,7 @@ fun ServerDrawerContent(
     onToggleOffline: () -> Unit,
     onOpenSettings: () -> Unit,
     onMarkAllRead: () -> Unit,
+    onScanInvite: () -> Unit = {},
     // Manual ordering. onMoveNetwork is one finished intent (persisted immediately);
     // onCommitNetworkOrder receives the arrangement a drag terminated on, exactly once per drag.
     onMoveNetwork: (Long, Int) -> Unit = { _, _ -> },
@@ -272,6 +274,13 @@ fun ServerDrawerContent(
                 selected = false,
                 onClick = onAddNetwork,
                 modifier = Modifier.padding(horizontal = 12.dp),
+            )
+            NavigationDrawerItem(
+                icon = { Icon(Icons.Filled.QrCodeScanner, contentDescription = null) },
+                label = { Text(stringResource(R.string.invite_scan_title)) },
+                selected = false,
+                onClick = onScanInvite,
+                modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_scan_invite"),
             )
             NavigationDrawerItem(
                 icon = {

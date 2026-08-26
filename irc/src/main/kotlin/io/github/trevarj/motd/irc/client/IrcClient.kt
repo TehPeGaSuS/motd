@@ -254,6 +254,8 @@ class IrcClient(
     private val unlabeledWhoisLock = Mutex()
     private val unlabeledChannelListLock = Mutex()
     private var unlabeledChannelListDrain: Job? = null
+    private val accountRegistrationLock = Mutex()
+    private val sensitiveEchoes = ConcurrentHashMap<String, Int>()
     private val outboundLock = Mutex()
     private val batches = BatchAssembler()
     private val typingOutbox = TypingOutbox()
@@ -325,6 +327,7 @@ class IrcClient(
         unlabeledSearch.failAll(CancellationException("client stopped"))
         unlabeledWhois.failAll(CancellationException("client stopped"))
         cancelWhoxRequests("client stopped")
+        sensitiveEchoes.clear()
         batches.reset()
         eventMapper.reset()
         val t = transport
@@ -546,6 +549,8 @@ class IrcClient(
         t: IrcTransport,
         criticalEvents: Channel<IrcEvent>,
     ) {
+        // Credential-bearing service commands must never become persisted self-echo chat rows.
+        if (consumeSensitiveEcho(msg)) return
         // Labeled responses are consumed by the correlator (incl. their batch contents).
         if (labels.route(msg)) return
         // Released soju lacks labeled-response, but its CHATHISTORY/SEARCH replies remain batched.
@@ -991,6 +996,52 @@ class IrcClient(
         val t = transport ?: return false
         sendSerialized(t, msg)
         return true
+    }
+
+    /** PRIVMSG whose own echo contains a credential. Suppression is in-memory and narrowly exact. */
+    suspend fun sendSensitivePrivmsg(
+        target: String,
+        text: String,
+    ): Boolean {
+        val key = sensitiveEchoKey(target, text)
+        sensitiveEchoes.merge(key, 1, Int::plus)
+        val accepted =
+            try {
+                sendIfConnected(IrcMessage(command = "PRIVMSG", params = listOf(target, text)))
+            } catch (error: Throwable) {
+                decrementSensitiveEcho(key)
+                throw error
+            }
+        if (!accepted) {
+            decrementSensitiveEcho(key)
+            return false
+        }
+        scope.launch {
+            delay(SENSITIVE_ECHO_TTL_MS)
+            decrementSensitiveEcho(key)
+        }
+        return true
+    }
+
+    private fun consumeSensitiveEcho(msg: IrcMessage): Boolean {
+        if (msg.command != "PRIVMSG" || msg.source?.nick?.let { _isupport.get().normalize(it) } != _isupport.get().normalize(selfNick.get())) {
+            return false
+        }
+        val target = msg.params.getOrNull(0) ?: return false
+        val text = msg.params.getOrNull(1) ?: return false
+        val key = sensitiveEchoKey(target, text)
+        if (sensitiveEchoes[key] == null) return false
+        decrementSensitiveEcho(key)
+        return true
+    }
+
+    private fun sensitiveEchoKey(
+        target: String,
+        text: String,
+    ): String = "${_isupport.get().normalize(target)}\u0000$text"
+
+    private fun decrementSensitiveEcho(key: String) {
+        sensitiveEchoes.computeIfPresent(key) { _, count -> (count - 1).takeIf { it > 0 } }
     }
 
     /** Send a logical protocol message without allowing another coroutine to interleave lines. */
@@ -1624,6 +1675,143 @@ class IrcClient(
         return ChannelListing(channel, count, topic)
     }
 
+    // -- account registration --
+
+    val accountRegistrationPolicy: AccountRegistrationPolicy?
+        get() = accountRegistrationPolicy(caps)
+
+    suspend fun registerAccount(
+        account: String,
+        email: String?,
+        password: String,
+    ): AccountRegistrationResult {
+        requireRegistrationToken(account, allowStar = true)
+        email?.let { requireRegistrationToken(it, allowStar = false) }
+        require(password.isNotEmpty() && password.toByteArray(Charsets.UTF_8).size <= 300 && password.none { it == '\r' || it == '\n' || it == '\u0000' }) {
+            "invalid account registration password"
+        }
+        return accountRegistrationCommand(
+            command = "REGISTER",
+            message = IrcMessage(command = "REGISTER", params = listOf(account, email ?: "*", password)),
+        )
+    }
+
+    suspend fun verifyAccount(
+        account: String,
+        code: String,
+    ): AccountRegistrationResult {
+        requireRegistrationToken(account, allowStar = true)
+        requireRegistrationToken(code, allowStar = false)
+        return accountRegistrationCommand(
+            command = "VERIFY",
+            message = IrcMessage(command = "VERIFY", params = listOf(account, code)),
+        )
+    }
+
+    private fun requireRegistrationToken(
+        value: String,
+        allowStar: Boolean,
+    ) {
+        require(
+            value.isNotEmpty() && value.toByteArray(Charsets.UTF_8).size <= 300 &&
+                value.none { it.isWhitespace() || it == '\r' || it == '\n' || it == '\u0000' } &&
+                (allowStar || value != "*"),
+        ) {
+            "invalid account registration field"
+        }
+    }
+
+    private suspend fun accountRegistrationCommand(
+        command: String,
+        message: IrcMessage,
+    ): AccountRegistrationResult =
+        accountRegistrationLock.withLock {
+            if (!hasCap(ACCOUNT_REGISTRATION_CAP)) throw IrcProtocolException(command, "account registration is unsupported")
+            val policy = accountRegistrationPolicy
+            if (command == "REGISTER") {
+                val password = message.params.last()
+                val length = password.toByteArray(Charsets.UTF_8).size
+                require(policy?.minPasswordLength?.let { length >= it } != false) { "password is shorter than server minimum" }
+                require(policy?.maxPasswordLength?.let { length <= it } != false) { "password exceeds server maximum" }
+            }
+            val t = transport ?: throw IrcDisconnectedException(command, null)
+            coroutineScope {
+                val response =
+                    async(start = CoroutineStart.UNDISPATCHED) {
+                        broadcastEvents
+                            .mapNotNull { event ->
+                                when (event) {
+                                    is IrcEvent.Raw -> {
+                                        val raw = event.message
+                                        if (raw.command != command) return@mapNotNull null
+                                        when (raw.params.firstOrNull()) {
+                                            "SUCCESS" -> {
+                                                AccountRegistrationWire.Success(
+                                                    raw.params.getOrNull(1).orEmpty(),
+                                                    raw.params.lastOrNull().orEmpty(),
+                                                )
+                                            }
+
+                                            "VERIFICATION_REQUIRED" -> {
+                                                AccountRegistrationWire.VerificationRequired(
+                                                    raw.params.getOrNull(1).orEmpty(),
+                                                    raw.params.lastOrNull().orEmpty(),
+                                                )
+                                            }
+
+                                            else -> {
+                                                null
+                                            }
+                                        }
+                                    }
+
+                                    is IrcEvent.StandardReply -> {
+                                        if (event.severity == IrcEvent.StandardReplySeverity.FAIL &&
+                                            event.commandName.equals(command, ignoreCase = true)
+                                        ) {
+                                            AccountRegistrationWire.Failure(event.code, event.description)
+                                        } else {
+                                            null
+                                        }
+                                    }
+
+                                    is IrcEvent.Disconnected -> {
+                                        AccountRegistrationWire.Disconnected(event.reason)
+                                    }
+
+                                    else -> {
+                                        null
+                                    }
+                                }
+                            }.first()
+                    }
+                try {
+                    sendSerialized(t, message)
+                    when (val result = withTimeout(ACCOUNT_REGISTRATION_TIMEOUT_MS) { response.await() }) {
+                        is AccountRegistrationWire.Success -> {
+                            AccountRegistrationResult.Success(result.account, result.message)
+                        }
+
+                        is AccountRegistrationWire.VerificationRequired -> {
+                            AccountRegistrationResult.VerificationRequired(result.account, result.message)
+                        }
+
+                        is AccountRegistrationWire.Failure -> {
+                            throw IrcCommandException(command, result.code, result.message)
+                        }
+
+                        is AccountRegistrationWire.Disconnected -> {
+                            throw IrcDisconnectedException(command, result.reason)
+                        }
+                    }
+                } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                    throw IrcTimeoutException(command)
+                } finally {
+                    response.cancel()
+                }
+            }
+        }
+
     // -- soju webpush --
 
     suspend fun webpushRegister(
@@ -1867,6 +2055,8 @@ class IrcClient(
         const val BOUNCER_LIST_PROBE_GRACE_MS = 5_000L
         const val LIST_TIMEOUT_MS = 15_000L
         const val LIST_DRAIN_WAIT_MS = 15_000L
+        const val ACCOUNT_REGISTRATION_TIMEOUT_MS = 30_000L
+        const val SENSITIVE_ECHO_TTL_MS = 30_000L
         const val WEBPUSH_TIMEOUT_MS = 30_000L
         const val WHOX_TIMEOUT_MS = 15_000L
         const val CRITICAL_EVENT_CAPACITY = 4096
@@ -1874,6 +2064,27 @@ class IrcClient(
         const val DEFAULT_HISTORY_PAGE_LIMIT = 100
         const val CHATHISTORY_CAP = "draft/chathistory"
     }
+}
+
+private sealed interface AccountRegistrationWire {
+    data class Success(
+        val account: String,
+        val message: String,
+    ) : AccountRegistrationWire
+
+    data class VerificationRequired(
+        val account: String,
+        val message: String,
+    ) : AccountRegistrationWire
+
+    data class Failure(
+        val code: String,
+        val message: String,
+    ) : AccountRegistrationWire
+
+    data class Disconnected(
+        val reason: String?,
+    ) : AccountRegistrationWire
 }
 
 private sealed interface WebPushResponse {

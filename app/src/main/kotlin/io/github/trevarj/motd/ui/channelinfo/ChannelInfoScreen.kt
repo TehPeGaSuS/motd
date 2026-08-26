@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Edit
@@ -90,6 +91,7 @@ fun ChannelInfoScreen(
     bufferId: Long,
     onBack: () -> Unit = {},
     onOpenBuffer: (Long) -> Unit = {},
+    onCreateInvite: (Long) -> Unit = {},
     viewModel: ChannelInfoViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(bufferId) { viewModel.init(bufferId) }
@@ -203,6 +205,7 @@ fun ChannelInfoScreen(
         onRetryMembers = viewModel::retryMembers,
         onQueryChange = viewModel::setQuery,
         onEditAvatar = { avatarEditorOpen = true },
+        onCreateInvite = { onCreateInvite(bufferId) },
     )
 
     AvatarEditorSheet(
@@ -321,6 +324,7 @@ fun ChannelInfoContent(
     onRetryMembers: () -> Unit = {},
     onQueryChange: (String) -> Unit = {},
     onEditAvatar: () -> Unit = {},
+    onCreateInvite: () -> Unit = {},
 ) {
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showTopicEdit by remember { mutableStateOf(false) }
@@ -373,6 +377,7 @@ fun ChannelInfoContent(
                         showLeaveConfirm = true
                     },
                     onEditAvatar = onEditAvatar,
+                    onCreateInvite = onCreateInvite,
                 )
             }
             // Non-ops get no section at all rather than a wall of disabled controls; the gate
@@ -805,6 +810,7 @@ private fun ActionsRow(
     onSetMuted: (Boolean) -> Unit,
     onLeave: () -> Unit,
     onEditAvatar: () -> Unit = {},
+    onCreateInvite: () -> Unit = {},
 ) {
     val pinned = buffer?.pinned == true
     val muted = buffer?.muted == true
@@ -830,6 +836,11 @@ private fun ActionsRow(
             onClick = { onSetPinned(!pinned) },
         )
         if (buffer?.type == BufferType.CHANNEL) {
+            ActionItem(
+                icon = Icons.Filled.QrCode2,
+                label = stringResource(R.string.invite_friend),
+                onClick = onCreateInvite,
+            )
             ActionItem(
                 icon = Icons.AutoMirrored.Outlined.Logout,
                 label = stringResource(R.string.channelinfo_leave),

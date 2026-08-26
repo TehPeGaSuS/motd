@@ -21,10 +21,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -68,6 +70,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 fun AddNetworkScreen(
     onBack: () -> Unit = {},
     onOpenBouncerNetworks: (Long) -> Unit = {},
+    onScanInvite: () -> Unit = {},
     viewModel: AddNetworkViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -89,6 +92,7 @@ fun AddNetworkScreen(
         onAbandon = { viewModel.abandon(onBack) },
         onConfirmPlaintext = { viewModel.confirmPlaintext(onOpenBouncerNetworks, onBack) },
         onDismissPlaintext = viewModel::dismissPlaintextWarning,
+        onScanInvite = onScanInvite,
     )
 }
 
@@ -112,6 +116,7 @@ fun AddNetworkContent(
     onAbandon: () -> Unit,
     onConfirmPlaintext: () -> Unit,
     onDismissPlaintext: () -> Unit,
+    onScanInvite: () -> Unit = {},
 ) {
     // During TESTING/FAILED a row already exists; back-press must delete it first.
     val hasHalfCreated = state.phase != AddNetworkPhase.FORM
@@ -144,6 +149,13 @@ fun AddNetworkContent(
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                FilledTonalButton(
+                    onClick = onScanInvite,
+                    modifier = Modifier.fillMaxWidth().testTag("add_network_scan_invite"),
+                ) {
+                    Icon(Icons.Filled.QrCodeScanner, contentDescription = null)
+                    Text(stringResource(R.string.invite_scan_title), modifier = Modifier.padding(start = 8.dp))
+                }
                 // The type group and the preset picker share one Column child so the collapsed
                 // picker sits outside the spacedBy flow; its 12dp gap lives inside the animation.
                 Column {

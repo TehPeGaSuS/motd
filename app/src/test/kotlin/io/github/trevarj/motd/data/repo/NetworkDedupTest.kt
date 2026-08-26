@@ -4,6 +4,7 @@ import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.InviteEnrollmentCleanup
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
@@ -91,6 +92,14 @@ class NetworkDedupTest {
             nick: String,
         ) {
             rows[id]?.let { rows[id] = it.copy(host = host, port = port, nick = nick) }
+        }
+    }
+
+    private class RecordingEnrollmentCleanup : InviteEnrollmentCleanup {
+        val cleared = mutableListOf<Long>()
+
+        override suspend fun clearNetwork(networkId: Long) {
+            cleared += networkId
         }
     }
 
@@ -296,7 +305,8 @@ class NetworkDedupTest {
         runBlocking {
             val dao = InMemoryNetworkDao()
             val kinds = RecordingBouncerKinds()
-            val repo = NetworkRepositoryImpl(dao, kinds)
+            val enrollment = RecordingEnrollmentCleanup()
+            val repo = NetworkRepositoryImpl(dao, kinds, enrollment)
             val rootId = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
             val childOne = repo.addNetwork(child(rootId, netId = "1"))
             val childTwo = repo.addNetwork(child(rootId, netId = "2"))
@@ -306,5 +316,6 @@ class NetworkDedupTest {
 
             assertEquals(setOf(unrelated), dao.rows.keys)
             assertEquals(setOf(rootId, childOne, childTwo), kinds.cleared.toSet())
+            assertEquals(setOf(rootId, childOne, childTwo), enrollment.cleared.toSet())
         }
 }

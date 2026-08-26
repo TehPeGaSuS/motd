@@ -89,7 +89,7 @@ fun BackupRestoreScreen(
     ) {
         SettingsGroup("Export configuration") {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Messages, chat history, drafts, generated push keys, cached previews, upload history, certificate pins, and runtime state are not exported.")
+                Text("Messages, chat history, drafts, generated push keys, cached previews, upload history, certificate pins, pending account setup, channel keys, and runtime state are not exported.")
                 // The switch row and the password field share one Column child so the collapsed
                 // field sits outside the spacedBy flow; its 12dp gap lives inside the animation.
                 Column {

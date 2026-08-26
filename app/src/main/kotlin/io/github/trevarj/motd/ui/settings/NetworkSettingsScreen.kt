@@ -90,6 +90,7 @@ fun NetworkSettingsScreen(
     onOpenBouncerNetworks: (Long) -> Unit = {},
     onOpenBuffer: (Long) -> Unit = {},
     onOpenNetworkTools: (Long) -> Unit = {},
+    onOpenAccountSetup: (Long) -> Unit = {},
     viewModel: NetworkSettingsViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(networkId) { viewModel.init(networkId) }
@@ -118,6 +119,7 @@ fun NetworkSettingsScreen(
         onOpenBouncerNetworks = { onOpenBouncerNetworks(networkId) },
         onOpenServerMessages = { viewModel.openServerBuffer(onOpenBuffer) },
         onOpenNetworkTools = { onOpenNetworkTools(networkId) },
+        onOpenAccountSetup = { onOpenAccountSetup(networkId) },
         onAvatarUrlChange = viewModel::editAvatarUrl,
         onPublishAvatar = viewModel::publishAvatar,
         onClearAvatar = viewModel::clearPublishedAvatar,
@@ -151,6 +153,7 @@ fun NetworkSettingsContent(
     onOpenBouncerNetworks: () -> Unit = {},
     onOpenServerMessages: () -> Unit = {},
     onOpenNetworkTools: () -> Unit = {},
+    onOpenAccountSetup: () -> Unit = {},
     onAvatarUrlChange: (String) -> Unit = {},
     onPublishAvatar: () -> Unit = {},
     onClearAvatar: () -> Unit = {},
@@ -193,6 +196,14 @@ fun NetworkSettingsContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 SettingsGroup { StatusCard(state.connState, onConnect, onDisconnect) }
+                if (state.entity?.role == NetworkRole.DIRECT && state.server.tls && state.auth.mode == AuthMode.NONE &&
+                    state.auth.nickServPassword.isBlank()
+                ) {
+                    FilledTonalButton(
+                        onClick = onOpenAccountSetup,
+                        modifier = Modifier.fillMaxWidth().testTag("network_account_setup"),
+                    ) { Text(stringResource(R.string.account_setup_title)) }
+                }
                 SettingsGroup(title = stringResource(R.string.network_settings_general_section)) {
                     OutlinedTextField(
                         value = state.displayName,

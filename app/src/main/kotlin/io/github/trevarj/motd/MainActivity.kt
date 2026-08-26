@@ -42,6 +42,7 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.gesture.radial.GestureOrbHost
+import io.github.trevarj.motd.invite.JoinInviteCodec
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ConnectionManagerImpl
 import io.github.trevarj.motd.service.DeliveryMode
@@ -108,6 +109,10 @@ class MainActivity :
     // in [pendingShareStore]; this state only drives the navigation to the chat picker.
     private var pendingShare by mutableStateOf<PendingShare?>(null)
 
+    // Validated external motd://invite payload. Empty means an invite URI was present but invalid,
+    // so the destination can render a safe error instead of silently dropping the user's scan.
+    private var pendingJoinInvite by mutableStateOf<String?>(null)
+
     private val rootUiState by lazy {
         combine(
             settingsRepository.settings,
@@ -136,6 +141,7 @@ class MainActivity :
         // Cold start: the launcher created the activity with the notification's content intent.
         notificationTarget = parseNotificationTarget(intent)
         acceptShareFrom(intent)
+        acceptJoinInviteFrom(intent)
         acceptInvitationFrom(intent)
 
         setContent {
@@ -205,6 +211,8 @@ class MainActivity :
                             onNotificationTargetHandled = ::consumeNotificationTarget,
                             pendingShare = pendingShare,
                             onPendingShareHandled = ::consumePendingShare,
+                            pendingJoinInvite = pendingJoinInvite,
+                            onPendingJoinInviteHandled = ::consumePendingJoinInvite,
                         )
                         // Global TOFU cert-trust dialog host, above the whole navigation graph.
                         CertTrustDialogHost()
@@ -231,6 +239,7 @@ class MainActivity :
             },
         )
         acceptShareFrom(intent)
+        acceptJoinInviteFrom(intent)
         acceptInvitationFrom(intent)
     }
 
@@ -262,6 +271,17 @@ class MainActivity :
         parseSharedContent(intent)?.let {
             pendingShareStore.set(it)
             pendingShare = it
+        }
+    }
+
+    private fun acceptJoinInviteFrom(intent: Intent?) {
+        parseJoinInvitePayload(intent)?.let { pendingJoinInvite = it }
+    }
+
+    private fun consumePendingJoinInvite() {
+        pendingJoinInvite = null
+        if (intent.action == Intent.ACTION_VIEW) {
+            setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
         }
     }
 
@@ -305,6 +325,12 @@ class MainActivity :
             }
         }
     }
+}
+
+/** Null means unrelated intent; empty means matching motd invite with invalid untrusted data. */
+internal fun parseJoinInvitePayload(intent: Intent?): String? {
+    if (intent?.action != Intent.ACTION_VIEW || intent.data?.scheme != "motd" || intent.data?.host != "invite") return null
+    return runCatching { JoinInviteCodec.encode(JoinInviteCodec.parse(intent.data.toString())) }.getOrDefault("")
 }
 
 /**

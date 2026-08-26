@@ -13,6 +13,11 @@ class ChatListOnboardingTest {
     }
 
     @Test
+    fun pendingInviteSuppressesManualOnboardingRace() {
+        assertFalse(shouldOpenOnboarding(ChatListState(loading = false), suppressed = true))
+    }
+
+    @Test
     fun completedOnboardingKeepsEmptyMainScreen() {
         assertFalse(
             shouldOpenOnboarding(

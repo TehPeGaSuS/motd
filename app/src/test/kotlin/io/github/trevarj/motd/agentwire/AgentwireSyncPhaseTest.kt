@@ -484,8 +484,9 @@ class AgentwireSyncPhaseTest {
             networkId: Long,
             channel: String,
             key: String?,
-        ) {
+        ): Boolean {
             joins += networkId to channel
+            return true
         }
 
         override suspend fun ensureQueryBuffer(

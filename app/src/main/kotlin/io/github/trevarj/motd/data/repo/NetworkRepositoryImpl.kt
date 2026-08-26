@@ -4,7 +4,9 @@ import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.InviteEnrollmentCleanup
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.NoopInviteEnrollmentCleanup
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -19,6 +21,7 @@ class NetworkRepositoryImpl
     constructor(
         private val networkDao: NetworkDao,
         private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
+        private val inviteEnrollmentCleanup: InviteEnrollmentCleanup = NoopInviteEnrollmentCleanup,
     ) : NetworkRepository {
         private val addMutex = Mutex()
 
@@ -56,6 +59,7 @@ class NetworkRepositoryImpl
         override suspend fun deleteNetwork(id: Long) {
             networkDao.deleteLocalTree(id).forEach { deletedId ->
                 bouncerKindPrefs.clear(deletedId)
+                inviteEnrollmentCleanup.clearNetwork(deletedId)
             }
         }
 
