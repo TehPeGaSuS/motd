@@ -598,7 +598,23 @@ class LinkPreviewRepositoryImpl
                     ?.takeIf { it.isNotEmpty() }
             }
 
-            // Minimal HTML entity decode for the handful common in OG text.
+            private val NUMERIC_ENTITY = Regex("&#(x[0-9a-fA-F]+|[0-9]+);")
+            private val NAMED_ENTITIES =
+                mapOf(
+                    "nbsp" to " ",
+                    "ndash" to "–",
+                    "mdash" to "—",
+                    "hellip" to "…",
+                    "rsquo" to "’",
+                    "lsquo" to "‘",
+                    "rdquo" to "”",
+                    "ldquo" to "“",
+                )
+
+            // HTML entity decode for OG/title text: the handful of literal entities common in hand-
+            // written markup, plus numeric character references (decimal and hex) that CMS-rendered
+            // pages routinely emit for punctuation like en/em dashes. sanitizeText still runs after
+            // this and strips any CONTROL/FORMAT code points a malicious numeric reference decodes to.
             private fun decodeEntities(s: String): String =
                 s
                     .replace("&amp;", "&")
@@ -607,6 +623,25 @@ class LinkPreviewRepositoryImpl
                     .replace("&quot;", "\"")
                     .replace("&#39;", "'")
                     .replace("&#x27;", "'")
+                    .let { withNamed ->
+                        NAMED_ENTITIES.entries.fold(withNamed) { acc, (name, value) ->
+                            acc.replace("&$name;", value)
+                        }
+                    }.let { withNumeric ->
+                        NUMERIC_ENTITY.replace(withNumeric) { match ->
+                            val ref = match.groupValues[1]
+                            val codePoint =
+                                if (ref.startsWith("x", ignoreCase = true)) {
+                                    ref.drop(1).toIntOrNull(16)
+                                } else {
+                                    ref.toIntOrNull()
+                                }
+                            codePoint
+                                ?.takeIf(Character::isValidCodePoint)
+                                ?.let { String(Character.toChars(it)) }
+                                ?: match.value
+                        }
+                    }
 
             internal fun isPopularVideoUrl(url: String): Boolean =
                 runCatching {
