@@ -68,6 +68,7 @@ import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.NetworkChip
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.avatarsHidden
+import io.github.trevarj.motd.ui.components.mircFormattedText
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.components.resolveIs24Hour
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
@@ -410,8 +411,7 @@ fun ChatListRowItem(
                     text =
                         when (preview) {
                             is ChatListMessagePreview.Text -> {
-                                androidx.compose.ui.text
-                                    .AnnotatedString(preview.value)
+                                mircFormattedText(preview.value)
                             }
 
                             is ChatListMessagePreview.Voice -> {
