@@ -432,6 +432,17 @@ class AgentwireSyncPhaseTest {
 
         override suspend fun setEnabled(enabled: Boolean) = Unit
 
+        // Kept off the real DataStore so the handshake tests never touch preference file IO.
+        override fun recentSessions(channel: String): Flow<List<AgentwireRecentSession>> = flowOf(emptyList())
+
+        override suspend fun addRecentSession(
+            channel: String,
+            sid: String,
+            title: String,
+            cwd: String?,
+            backend: String?,
+        ) = Unit
+
         override suspend fun deviceId(): String = "device-under-test"
     }
 

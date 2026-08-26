@@ -17,6 +17,10 @@ private val Context.agentwireDataStore by preferencesDataStore("agentwire_labs")
 private val ENABLED = booleanPreferencesKey("enabled_v1")
 private val DEVICE = stringPreferencesKey("device_v1")
 
+// Recents are per channel: one channel binds one session, and the drawer only offers this
+// channel's history.
+private fun recentSessionsKey(channel: String) = stringPreferencesKey("recent_sessions_v1:$channel")
+
 /** Isolated from Settings exports so restoring normal configuration cannot enable this lab. */
 @Singleton
 open class AgentwirePrefs
@@ -29,6 +33,28 @@ open class AgentwirePrefs
 
         open suspend fun setEnabled(enabled: Boolean) {
             store.edit { it[ENABLED] = enabled }
+        }
+
+        open fun recentSessions(channel: String): Flow<List<AgentwireRecentSession>> = store.data.map { decodeAgentwireRecents(it[recentSessionsKey(channel)]) }
+
+        open suspend fun addRecentSession(
+            channel: String,
+            sid: String,
+            title: String,
+            cwd: String?,
+            backend: String?,
+        ) {
+            if (channel.isBlank()) return
+            val key = recentSessionsKey(channel)
+            store.edit { preferences ->
+                preferences[key] =
+                    encodeAgentwireRecents(
+                        agentwireRecentsWith(
+                            decodeAgentwireRecents(preferences[key]),
+                            AgentwireRecentSession(sid, title, cwd, backend),
+                        ),
+                    )
+            }
         }
 
         open suspend fun deviceId(): String {

@@ -157,6 +157,8 @@ data class AgentwireUiState(
     val liveSessions: List<AgentwireListItem> = emptyList(),
     val workspaceSessions: Map<String, List<AgentwireListItem>> = emptyMap(),
     val loadedSessionDirectories: Set<String> = emptySet(),
+    /** Sessions this channel bound before, newest first; persisted by [AgentwirePrefs]. */
+    val recentSessions: List<AgentwireRecentSession> = emptyList(),
     val queue: List<AgentwireQueueItem> = emptyList(),
     val requests: List<AgentwireRequest> = emptyList(),
     val timeline: List<AgentwireTimelineItem> = emptyList(),
