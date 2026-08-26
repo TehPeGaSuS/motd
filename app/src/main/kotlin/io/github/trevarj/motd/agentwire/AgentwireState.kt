@@ -18,6 +18,12 @@ import kotlinx.serialization.json.intOrNull
  */
 enum class AgentwireGate { LOADING, ORDINARY, INVALID_TOPIC, BLOCKED, ACTIVE }
 
+/**
+ * Bound of the live timeline. Evicted items are not lost: [AgentwireLogStore] still answers for
+ * their full payload, and older transcript is re-fetchable through `history.request`.
+ */
+internal const val AGENTWIRE_TIMELINE_CAP = 400
+
 private val SESSION_OWNED_KINDS =
     setOf(
         "session.snapshot",
@@ -831,19 +837,39 @@ private fun restoredSessionTimeline(
     return restoredOutputs + restoredActivity
 }
 
-private fun List<AgentwireTimelineItem>.upsert(item: AgentwireTimelineItem): List<AgentwireTimelineItem> {
+private fun List<AgentwireTimelineItem>.upsert(item: AgentwireTimelineItem): List<AgentwireTimelineItem> = insertOrReplace(item).capTimeline()
+
+/**
+ * Keeps the list ordered by `at` without re-sorting it on every event: a replacement lands in
+ * place, and a new item is spliced at the binary-searched upper bound of its timestamp (so items
+ * sharing a timestamp keep arrival order, as the previous stable sort did).
+ */
+private fun List<AgentwireTimelineItem>.insertOrReplace(item: AgentwireTimelineItem): List<AgentwireTimelineItem> {
     val stableId = item.stableTimelineId()
-    if (stableId == null) return (this + item).sortedBy(AgentwireTimelineItem::at)
-    val existing =
-        indexOfFirst { old ->
-            old.stableTimelineId() == stableId
+    if (stableId != null) {
+        val existing =
+            indexOfFirst { old ->
+                old.stableTimelineId() == stableId
+            }
+        if (existing >= 0) {
+            // The first sighting fixes the row's position: a tool that completes later must not
+            // jump past everything logged while it ran, and re-sorting is what we are avoiding.
+            return toMutableList().also { it[existing] = item.copy(at = this[existing].at) }
         }
-    return if (existing < 0) {
-        (this + item).sortedBy(AgentwireTimelineItem::at)
-    } else {
-        toMutableList().also { it[existing] = item }
+    }
+    var low = 0
+    var high = size
+    while (low < high) {
+        val mid = (low + high) ushr 1
+        if (this[mid].at <= item.at) low = mid + 1 else high = mid
+    }
+    return ArrayList<AgentwireTimelineItem>(size + 1).also {
+        it.addAll(this)
+        it.add(low, item)
     }
 }
+
+private fun List<AgentwireTimelineItem>.capTimeline(): List<AgentwireTimelineItem> = if (size <= AGENTWIRE_TIMELINE_CAP) this else subList(size - AGENTWIRE_TIMELINE_CAP, size).toList()
 
 /**
  * The LazyColumn key: stable across a tool/assistant item's lifecycle transitions, unlike [id],
@@ -881,13 +907,15 @@ internal fun AgentwireTimelineItem.stableTimelineId(): String? {
     }
 }
 
+// A history page is merged whole and only then capped, so a backfill is never truncated midway.
 private fun mergeHistoryPage(
     history: List<AgentwireTimelineItem>,
     current: List<AgentwireTimelineItem>,
 ): List<AgentwireTimelineItem> =
-    (history + current).fold(emptyList()) { result, item ->
-        result.upsert(item)
-    }
+    (history + current)
+        .fold(emptyList<AgentwireTimelineItem>()) { result, item ->
+            result.insertOrReplace(item)
+        }.capTimeline()
 
 private fun List<AgentwireTimelineItem>.stopPlan(turnId: String?): List<AgentwireTimelineItem> =
     map { item ->

@@ -87,6 +87,11 @@ class AgentwireViewModel
         private val budget = AgentwireSyncBudget(clock)
         private val _state = MutableStateFlow(AgentwireUiState())
         val state: StateFlow<AgentwireUiState> = _state.asStateFlow()
+        private val log = AgentwireLogStore()
+
+        // The log holds thousands of payloads; only its revision travels through the UI state stream.
+        private val _logRevision = MutableStateFlow(0L)
+        val logRevision: StateFlow<Long> = _logRevision.asStateFlow()
         private var sessionJob: Job? = null
         private var syncJob: Job? = null
         private var client: IrcClient? = null
@@ -206,6 +211,9 @@ class AgentwireViewModel
                     }
             }
         }
+
+        /** Snapshot for the log sheet, read on open and whenever [logRevision] advances. */
+        fun logEntries(): List<AgentwireLogEntry> = log.entries()
 
         fun viewTranscript() = _state.update { it.copy(transcriptOverride = true) }
 
@@ -437,6 +445,7 @@ class AgentwireViewModel
             client = next
             startedOnce = true
             session.reset()
+            clearLog()
             // Only a user-visible entry anchors the deadline; internal resyncs reuse it.
             budget.anchor()
             untrustedRecorded = false
@@ -617,6 +626,7 @@ class AgentwireViewModel
                 return
             }
             if (result is AgentwireDeliveryCoordinator.Result.ResyncRequired) {
+                clearLog()
                 // Deliberately no budget.anchor(): an internal restart must not extend the deadline.
                 _state.value =
                     result.state
@@ -640,6 +650,9 @@ class AgentwireViewModel
             }
             if (result !is AgentwireDeliveryCoordinator.Result.Updated) return
             val envelope = result.envelope
+            // Captured from the envelope, so the full payload outlives the timeline's cap and the
+            // inline card's truncation. History backfill included.
+            if (log.capture(envelope)) _logRevision.value += 1
             val previousSid = _state.value.activeSid
             _state.value =
                 if (result.syncCompleted) {
@@ -674,6 +687,11 @@ class AgentwireViewModel
             ) {
                 requestHistory(initial = true)
             }
+        }
+
+        private fun clearLog() {
+            log.clear()
+            _logRevision.value += 1
         }
 
         /** Records each newly bound session so the drawer can offer it again after detaching. */

@@ -91,6 +91,12 @@ internal fun agentwireDisplayRows(timeline: List<AgentwireTimelineItem>): List<A
 internal data class AgentwireTimelineStamp(
     val rowCount: Int,
     val contentLength: Long,
+    /**
+     * Timestamp of the newest timeline item. Once the timeline sits at [AGENTWIRE_TIMELINE_CAP],
+     * an arrival evicts an older row, so neither the row count nor the total content length is a
+     * reliable arrival signal any more; this one still is.
+     */
+    val newestAt: Long = 0,
 )
 
 internal fun agentwireTimelineStamp(
@@ -100,7 +106,14 @@ internal fun agentwireTimelineStamp(
     AgentwireTimelineStamp(
         rowCount = timeline.size + requestCount,
         contentLength = timeline.sumOf { (it.body?.length ?: 0).toLong() },
+        newestAt = timeline.lastOrNull()?.at ?: 0,
     )
+
+/** A new row landed at the tail, as opposed to an existing row's body growing mid-stream. */
+internal fun AgentwireTimelineStamp.arrivedSince(prior: AgentwireTimelineStamp): Boolean = rowCount > prior.rowCount || newestAt > prior.newestAt
+
+/** Any followable change: an arrival, or a streaming `assistant.delta` extending the last card. */
+internal fun AgentwireTimelineStamp.grewFrom(prior: AgentwireTimelineStamp): Boolean = arrivedSince(prior) || (rowCount == prior.rowCount && contentLength > prior.contentLength)
 
 /**
  * Tracks the user's decision to follow live arrivals independently from the list's transient
@@ -116,9 +129,9 @@ internal class AgentwireAutoFollow(
 
     private var stamp = initialStamp
 
-    /** The last row count consumed by [onTimelineChanged]; lets callers compute arrival deltas. */
-    val presentedRowCount: Int
-        get() = stamp.rowCount
+    /** The last stamp consumed by [onTimelineChanged]; lets callers compute arrival deltas. */
+    val presentedStamp: AgentwireTimelineStamp
+        get() = stamp
 
     /** Consume a session rebind's first snapshot without treating it as a live arrival. */
     fun reset(
@@ -145,11 +158,8 @@ internal class AgentwireAutoFollow(
 
     /** Record the new stamp and return whether the caller should scroll to the bottom. */
     fun onTimelineChanged(new: AgentwireTimelineStamp): Boolean {
-        val grew =
-            new.rowCount > stamp.rowCount ||
-                (new.rowCount == stamp.rowCount && new.contentLength > stamp.contentLength)
         // An empty-to-populated transition is initial load, not a live arrival.
-        val follow = following && stamp.rowCount > 0 && grew
+        val follow = following && stamp.rowCount > 0 && new.grewFrom(stamp)
         stamp = new
         return follow
     }

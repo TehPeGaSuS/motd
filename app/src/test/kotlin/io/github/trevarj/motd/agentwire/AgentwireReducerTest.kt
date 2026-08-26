@@ -1472,6 +1472,119 @@ class AgentwireReducerTest {
     }
 
     @Test
+    fun `ordered insertion sorts events that arrive out of order without a full re-sort`() {
+        val reducer = AgentwireReducer()
+        var state = AgentwireUiState()
+        listOf(30L, 10L, 20L, 10L, 40L).forEach { at ->
+            state =
+                reducer.reduce(
+                    state,
+                    event(
+                        "assistant.completed",
+                        tid = "t1",
+                        at = at,
+                        data = buildJsonObject { put("content", "at-$at") },
+                    ),
+                )
+        }
+
+        assertEquals(listOf(10L, 10L, 20L, 30L, 40L), state.timeline.map(AgentwireTimelineItem::at))
+        // Items sharing a timestamp keep arrival order, as the previous stable sort did.
+        assertEquals(listOf("at-10", "at-10", "at-20", "at-30", "at-40"), state.timeline.map { it.body })
+    }
+
+    @Test
+    fun `a completing tool holds the position its first event claimed`() {
+        val reducer = AgentwireReducer()
+        var state =
+            reducer.reduce(
+                AgentwireUiState(),
+                event("tool.started", tid = "t1", iid = "i1", at = 10, data = buildJsonObject { put("id", "i1") }),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "assistant.completed",
+                    tid = "t1",
+                    iid = "a1",
+                    at = 20,
+                    data = buildJsonObject { put("content", "after") },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "tool.completed",
+                    tid = "t1",
+                    iid = "i1",
+                    at = 30,
+                    data =
+                        buildJsonObject {
+                            put("id", "i1")
+                            put("success", true)
+                        },
+                ),
+            )
+
+        assertEquals(listOf("tool.completed", "assistant.completed"), state.timeline.map(AgentwireTimelineItem::kind))
+        assertEquals(listOf(10L, 20L), state.timeline.map(AgentwireTimelineItem::at))
+    }
+
+    @Test
+    fun `the live timeline is capped and keeps the newest items`() {
+        val reducer = AgentwireReducer()
+        var state = AgentwireUiState()
+        val total = AGENTWIRE_TIMELINE_CAP + 50
+        (1..total).forEach { index ->
+            state =
+                reducer.reduce(
+                    state,
+                    event(
+                        "assistant.completed",
+                        tid = "t1",
+                        at = index.toLong(),
+                        data = buildJsonObject { put("content", "line-$index") },
+                    ),
+                )
+        }
+
+        assertEquals(AGENTWIRE_TIMELINE_CAP, state.timeline.size)
+        assertEquals(51L, state.timeline.first().at)
+        assertEquals(total.toLong(), state.timeline.last().at)
+    }
+
+    @Test
+    fun `an arrival at the cap still reads as growth to auto-follow`() {
+        val capped = List(AGENTWIRE_TIMELINE_CAP) { index -> timelineItem(index) }
+        val before = agentwireTimelineStamp(capped, requestCount = 0)
+        // Eviction keeps the row count flat and can shrink the total body length.
+        val after =
+            agentwireTimelineStamp(
+                capped.drop(1) + timelineItem(AGENTWIRE_TIMELINE_CAP, body = ""),
+                requestCount = 0,
+            )
+
+        assertTrue(after.arrivedSince(before))
+        val follow = AgentwireAutoFollow(before)
+        assertTrue(follow.onTimelineChanged(after))
+    }
+
+    private fun timelineItem(
+        index: Int,
+        body: String = "line-$index",
+    ) = AgentwireTimelineItem(
+        id = "i$index",
+        kind = "assistant.completed",
+        at = index.toLong(),
+        sid = "s1",
+        tid = "t1",
+        title = "Assistant",
+        body = body,
+    )
+
+    @Test
     fun `subagent detail line is built only from reported numbers`() {
         val agent = AgentwireSubagent("a1", "Terra", "x", "completed", false)
 
@@ -1499,12 +1612,13 @@ class AgentwireReducerTest {
         reply: String? = null,
         history: Boolean? = null,
         epoch: String = "epoch",
+        at: Long = 1,
         data: kotlinx.serialization.json.JsonObject? = null,
     ) = AgentwireEnvelope(
         kind,
         "event",
         UUID.randomUUID().toString(),
-        1,
+        at,
         "bridge",
         epoch,
         sid = sid,

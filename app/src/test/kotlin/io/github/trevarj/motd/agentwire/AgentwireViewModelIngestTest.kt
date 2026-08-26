@@ -90,6 +90,89 @@ class AgentwireViewModelIngestTest {
         assertEquals("shared-epoch", state.epoch)
     }
 
+    @Test
+    fun `applied envelopes feed the session log until it is cleared`() {
+        val ingestor = AgentwireEventIngestor()
+        val log = AgentwireLogStore()
+        val syncId = "33333333-3333-4333-8333-333333333333"
+        var state =
+            AgentwireUiState(
+                channel = "#codex",
+                controllerAccount = "controller",
+                backendAccount = "agent-a",
+            )
+        state = applied(ingestor, state, inbound("agent-a", hello(syncId, "epoch-a", setOf("turn.prompt"))), syncId)
+        state = applied(ingestor, state, inbound("agent-a", snapshot(syncId, "session-a")), syncId)
+
+        // The ViewModel captures from the envelope, so the log survives whatever the timeline
+        // later evicts - history backfill included.
+        listOf(
+            tool("tool.started", "dddddddd-dddd-4ddd-8ddd-ddddddddddd1", at = 10) {
+                put("id", "i1")
+                put("kind", "shell")
+                put("input", "rg=needle")
+            },
+            tool("tool.completed", "dddddddd-dddd-4ddd-8ddd-ddddddddddd2", at = 11) {
+                put("id", "i1")
+                put("kind", "shell")
+                put("input", "rg=needle")
+                put("output", "src/found.kt")
+                put("status", "completed")
+                put("exitCode", 0)
+            },
+            AgentwireEnvelope(
+                kind = "assistant.completed",
+                type = "event",
+                id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                at = 12,
+                instance = "agent",
+                epoch = "epoch-a",
+                sid = "session-a",
+                tid = "t1",
+                iid = "a1",
+                history = true,
+                data = buildJsonObject { put("content", "backfilled-answer") },
+            ),
+        ).forEach { envelope ->
+            val result =
+                ingestor.ingest(state, inbound("agent-a", envelope), syncId)
+                    as AgentwireEventIngestor.Result.Applied
+            state = result.state
+            log.capture(result.envelope)
+        }
+
+        val entries = log.entries()
+        assertEquals(listOf("assistant.completed", "tool.completed"), entries.map(AgentwireLogEntry::kind))
+        assertEquals("src/found.kt", entries.last().output)
+        assertEquals("rg=needle", entries.last().input)
+        assertEquals("backfilled-answer", entries.first().body)
+        assertEquals(listOf("src/found.kt"), agentwireLogQuery(entries, text = "FOUND").map { it.output })
+        // The log is additive: the live timeline keeps its own inline copy of the same payload.
+        val inlineTool = state.timeline.first { it.kind == "tool.completed" }
+        assertEquals("src/found.kt", inlineTool.data.string("output"))
+
+        log.clear()
+        assertTrue(log.entries().isEmpty())
+    }
+
+    private fun tool(
+        kind: String,
+        id: String,
+        at: Long,
+        data: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit,
+    ) = AgentwireEnvelope(
+        kind = kind,
+        type = "event",
+        id = id,
+        at = at,
+        instance = "agent",
+        epoch = "epoch-a",
+        sid = "session-a",
+        tid = "t1",
+        iid = "i1",
+        data = buildJsonObject(data),
+    )
+
     private fun applied(
         ingestor: AgentwireEventIngestor,
         state: AgentwireUiState,
