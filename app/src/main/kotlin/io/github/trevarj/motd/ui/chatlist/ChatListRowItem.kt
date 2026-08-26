@@ -59,6 +59,7 @@ import io.github.trevarj.motd.audio.parseAudioAttachments
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
@@ -68,7 +69,6 @@ import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.NetworkChip
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.avatarsHidden
-import io.github.trevarj.motd.ui.components.mircFormattedText
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.components.resolveIs24Hour
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
@@ -157,6 +157,13 @@ internal sealed interface ChatListMessagePreview {
         val durationMs: Long?,
     ) : ChatListMessagePreview
 }
+
+/**
+ * The preview line renders as plain text only: no color/bold/italic spans, just mIRC control codes
+ * stripped (a color prefix like `\x0302` must not leak into the row as literal digits).
+ */
+internal fun chatListPreviewText(text: String): androidx.compose.ui.text.AnnotatedString =
+    androidx.compose.ui.text.AnnotatedString(plainIrcText(text))
 
 internal fun chatListMessagePreview(text: String?): ChatListMessagePreview {
     val value = text.orEmpty()
@@ -411,7 +418,7 @@ fun ChatListRowItem(
                     text =
                         when (preview) {
                             is ChatListMessagePreview.Text -> {
-                                mircFormattedText(preview.value)
+                                chatListPreviewText(preview.value)
                             }
 
                             is ChatListMessagePreview.Voice -> {
