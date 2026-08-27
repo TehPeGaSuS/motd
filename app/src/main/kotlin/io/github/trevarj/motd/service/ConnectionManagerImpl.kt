@@ -1704,7 +1704,7 @@ class ConnectionManagerImpl
             // missing replay events emitted while this method was still doing other suspending work.
             val replayedChannels = mutableSetOf<String>()
             val replayCapture =
-                scope.launch {
+                scope.launch(start = CoroutineStart.UNDISPATCHED) {
                     withTimeoutOrNull(JOIN_REPLAY_SETTLE_TIMEOUT_MS) {
                         client.broadcastEvents
                             .filterIsInstance<IrcEvent.Joined>()
