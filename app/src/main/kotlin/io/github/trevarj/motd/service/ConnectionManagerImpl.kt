@@ -1694,6 +1694,24 @@ class ConnectionManagerImpl
             isCurrent: () -> Boolean,
         ) {
             if (!isCurrent()) return
+            // Some DIRECT-configured endpoints (a WeeChat relay-irc listener behind a real ircd
+            // session, or any other stateful backend not modeled as a bouncer role) replay a
+            // synthetic self JOIN (+332/353/366) for every already-joined channel unprompted, right
+            // after registration — sometimes before this method's other Ready-edge work (avatar sync,
+            // MONITOR reconciliation, STS, preset enrollment) has even started. Start listening for
+            // that replay immediately, in parallel with the rest of Ready, and only settle/consume it
+            // right before the recovery JOIN loop below — starting the collector any later risks
+            // missing replay events emitted while this method was still doing other suspending work.
+            val replayedChannels = mutableSetOf<String>()
+            val replayCapture =
+                scope.launch {
+                    withTimeoutOrNull(JOIN_REPLAY_SETTLE_TIMEOUT_MS) {
+                        client.broadcastEvents
+                            .filterIsInstance<IrcEvent.Joined>()
+                            .filter { it.isSelf }
+                            .collect { replayedChannels += client.isupport.normalize(it.channel) }
+                    }
+                }
             avatarCoordinator.onReady(row.id, client)
             if (!isCurrent()) return
             reconcileMonitor(
@@ -1729,26 +1747,17 @@ class ConnectionManagerImpl
             }
             // A fresh direct socket has no channel membership. Restore only channels whose durable
             // self JOIN state is still true; explicit PART/KICK rows set joined=false. Bouncer children
-            // remain entirely bouncer-managed. Some DIRECT-configured endpoints (a WeeChat relay-irc
-            // listener behind a real ircd session, or any other stateful backend not modeled as a
-            // bouncer role) replay a synthetic self JOIN (+332/353/366) for every already-joined
-            // channel unprompted, right after registration. Give those a short window to arrive and
-            // skip re-JOINing what the server already restored. Whatever's left still needs to go out
-            // as few JOIN lines as possible (comma-separated channel lists, IRC allows this) rather
-            // than one command per channel: an unbatched burst of dozens of JOINs queues up behind a
-            // shared connection's own outbound flood control (observed with WeeChat's relay-irc) and
-            // delays unrelated traffic multiplexed over that same connection for up to a minute.
+            // remain entirely bouncer-managed. Skip re-JOINing whatever the server already replayed
+            // (captured above) and send the rest as few JOIN lines as possible (comma-separated
+            // channel lists, IRC allows this) rather than one command per channel: an unbatched burst
+            // of dozens of JOINs queues up behind a shared connection's own outbound flood control
+            // (observed with WeeChat's relay-irc) and delays unrelated traffic multiplexed over that
+            // same connection for up to a minute.
             if (row.role == NetworkRole.DIRECT) {
                 val remembered = recoveryReader.joinedChannels(row.id)
                 if (remembered.isNotEmpty()) {
-                    val alreadyReplayed = mutableSetOf<String>()
-                    withTimeoutOrNull(JOIN_REPLAY_SETTLE_TIMEOUT_MS) {
-                        client.broadcastEvents
-                            .filterIsInstance<IrcEvent.Joined>()
-                            .filter { it.isSelf }
-                            .collect { alreadyReplayed += client.isupport.normalize(it.channel) }
-                    }
-                    val toJoin = remembered.filter { client.isupport.normalize(it) !in alreadyReplayed }
+                    replayCapture.join()
+                    val toJoin = channelsNeedingJoin(remembered, replayedChannels, client.isupport::normalize)
                     val (keyed, keyless) =
                         toJoin.partition {
                             inviteEnrollmentStore.channelKey(row.id, client.isupport.normalize(it)) != null
@@ -1763,7 +1772,7 @@ class ConnectionManagerImpl
                             ),
                         )
                     }
-                    for (batch in keyless.chunked(JOIN_BATCH_SIZE)) {
+                    for (batch in chunkChannelsForJoin(keyless)) {
                         if (!isCurrent()) return
                         client.send(
                             io.github.trevarj.motd.irc.proto.IrcMessage(
@@ -1772,7 +1781,11 @@ class ConnectionManagerImpl
                             ),
                         )
                     }
+                } else {
+                    replayCapture.cancel()
                 }
+            } else {
+                replayCapture.cancel()
             }
             if (!isCurrent()) return
             // A bound soju child becomes Ready before its post-bind feature CAP ACKs. Keep these
@@ -3047,13 +3060,50 @@ internal const val READ_MARKER_SETTLE_TIMEOUT_MS = 10_000L
 internal const val JOIN_REPLAY_SETTLE_TIMEOUT_MS = 1_500L
 
 /**
- * Max channels per batched reconnect JOIN line. IRC allows a comma-separated channel list in one
- * JOIN command; batching keeps a large remembered-channel set (dozens of channels is common on a
- * bouncer-backed network) to a handful of commands instead of one per channel, which is what
- * actually avoids tripping a shared connection's outbound flood control. Conservative relative to
- * the ~512 byte line limit even for long channel names.
+ * Which of [remembered] still need a self-JOIN: those the server did NOT already replay (per
+ * [replayedNormalized], a set of channel names normalized the same way as [remembered] via
+ * [normalize]) during the settle window.
  */
-internal const val JOIN_BATCH_SIZE = 15
+internal fun channelsNeedingJoin(
+    remembered: List<String>,
+    replayedNormalized: Set<String>,
+    normalize: (String) -> String,
+): List<String> = remembered.filter { normalize(it) !in replayedNormalized }
+
+/**
+ * Byte budget for one batched reconnect JOIN line's channel-list param, leaving room for the
+ * `JOIN ` command word and the trailing CRLF within [IrcMessage]'s 512-byte wire limit. A fixed
+ * channel-count batch size can't guarantee this: e.g. 15 legal 50-byte channel names would already
+ * overflow 512 bytes on their own, and [IrcMessage.serialize] throws rather than truncate — so
+ * batches must be sized by actual UTF-8 byte length, not channel count.
+ */
+private const val JOIN_LINE_BUDGET_BYTES = 500
+
+/**
+ * Greedily groups [channels] into comma-joined batches (IRC allows a channel list in one JOIN
+ * command) that each fit [JOIN_LINE_BUDGET_BYTES], accounting for the comma separators added by
+ * `joinToString(",")`. A single channel name that alone exceeds the budget still gets its own
+ * batch — [IrcMessage.serialize] is the final arbiter and will reject it if truly unsendable.
+ */
+internal fun chunkChannelsForJoin(channels: List<String>): List<List<String>> {
+    val batches = mutableListOf<List<String>>()
+    var current = mutableListOf<String>()
+    var currentBytes = 0
+    for (channel in channels) {
+        val channelBytes = channel.toByteArray(Charsets.UTF_8).size
+        val separatorBytesIfAppended = if (current.isEmpty()) 0 else 1
+        if (current.isNotEmpty() && currentBytes + separatorBytesIfAppended + channelBytes > JOIN_LINE_BUDGET_BYTES) {
+            batches += current
+            current = mutableListOf()
+            currentBytes = 0
+        }
+        val separatorBytes = if (current.isEmpty()) 0 else 1
+        current += channel
+        currentBytes += separatorBytes + channelBytes
+    }
+    if (current.isNotEmpty()) batches += current
+    return batches
+}
 
 /**
  * One Ready session's entry-gate release: the gate opens only when BOTH hold — the caller decided
