@@ -8,10 +8,6 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -65,13 +61,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -83,6 +77,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.attachment.AVAILABLE_ATTACHMENT_BACKENDS
 import io.github.trevarj.motd.attachment.AttachmentBackend
@@ -95,10 +90,7 @@ import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.supports
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
-import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 private sealed interface AttachmentFlow {
     data object Idle : AttachmentFlow
@@ -556,17 +548,6 @@ internal fun ConfirmationSheet(
     onDismiss: () -> Unit,
     onUpload: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val thumbnail by produceState<android.graphics.Bitmap?>(null, source) {
-        value =
-            if (source is AttachmentSource.Photo) {
-                withContext(Dispatchers.IO) {
-                    context.contentResolver.sampledThumbnail(source.uri)
-                }
-            } else {
-                null
-            }
-    }
     val sojuUnavailable = config.backend == AttachmentBackend.SOJU_FILEHOST && !sojuFileHostAvailable
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -583,32 +564,18 @@ internal fun ConfirmationSheet(
                 Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
                 if (source is AttachmentSource.Photo) {
-                    // The thumbnail decodes on IO after the sheet is already visible, so ease its
-                    // arrival instead of shoving the sheet content down in a single frame. The latched
-                    // bitmap keeps the expanding frames painted; no exit spec is needed because the
-                    // source key resets the whole confirm state.
-                    var lastBitmap by remember(source) { mutableStateOf<android.graphics.Bitmap?>(null) }
-                    thumbnail?.let { lastBitmap = it }
-                    AnimatedVisibility(
-                        visible = thumbnail != null,
-                        enter = fadeIn(MotdMotion.fadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
-                    ) {
-                        lastBitmap?.let { bitmap ->
-                            Column {
-                                Image(
-                                    bitmap.asImageBitmap(),
-                                    null,
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(16f / 9f)
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .testTag("attachment_thumbnail"),
-                                    contentScale = ContentScale.Crop,
-                                )
-                                Spacer(Modifier.height(12.dp))
-                            }
-                        }
-                    }
+                    AsyncImage(
+                        model = source.uri,
+                        contentDescription = null,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .clip(RoundedCornerShape(20.dp))
+                                .testTag("attachment_thumbnail"),
+                        contentScale = ContentScale.Crop,
+                    )
+                    Spacer(Modifier.height(12.dp))
                 }
                 AttachmentMetadata(source)
                 Spacer(Modifier.height(16.dp))
@@ -857,21 +824,5 @@ private fun android.content.ContentResolver.queryMeta(uri: Uri): Pair<String, Lo
     }
     return name to size
 }
-
-private fun android.content.ContentResolver.sampledThumbnail(uri: Uri): android.graphics.Bitmap? =
-    runCatching {
-        val bounds =
-            android.graphics.BitmapFactory
-                .Options()
-                .apply { inJustDecodeBounds = true }
-        openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
-        var sample = 1
-        while (bounds.outWidth / sample > 640 || bounds.outHeight / sample > 360) sample *= 2
-        val options =
-            android.graphics.BitmapFactory
-                .Options()
-                .apply { inSampleSize = sample.coerceAtLeast(1) }
-        openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
-    }.getOrNull()
 
 fun isLongDraft(text: String): Boolean = text.length >= 1_200 || text.lineSequence().count() >= 4
