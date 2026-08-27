@@ -116,6 +116,13 @@ class AttachmentModelsTest {
         )
     }
 
+    @Test fun disabled0x0BackendFallsBackToCrafterbin() {
+        assertFalse(AVAILABLE_ATTACHMENT_BACKENDS.contains(AttachmentBackend.ZERO_X_ZERO))
+        val config = normalizedConfig(PasteBackendConfig(backend = AttachmentBackend.ZERO_X_ZERO))
+        assertEquals(AttachmentBackend.CRAFTERBIN, config.backend)
+        assertEquals(AttachmentBackend.CRAFTERBIN.endpoint, config.endpoint)
+    }
+
     @Test fun publicLimitIsCappedAt25MiB() {
         val config = normalizedConfig(PasteBackendConfig(sizeLimitBytes = MAX_CUSTOM_LIMIT_BYTES))
         assertEquals(DEFAULT_PUBLIC_LIMIT_BYTES, config.sizeLimitBytes)
@@ -160,6 +167,13 @@ class AttachmentModelsTest {
             )
         assertEquals(MAX_X0AT_LIMIT_BYTES, capped.sizeLimitBytes)
         assertEquals("https://x0.at", capped.endpoint)
+    }
+
+    @Test fun durationSuffixesAreConvertedToProviderHours() {
+        assertEquals("168", PasteBackendConfig().expiry)
+        assertEquals("168", normalizedConfig(PasteBackendConfig(expiry = "7d")).expiry)
+        assertEquals("24", normalizedConfig(PasteBackendConfig(expiry = "24h")).expiry)
+        assertEquals("1735689600000", normalizedConfig(PasteBackendConfig(expiry = "1735689600000")).expiry)
     }
 
     @Test fun litterboxExpiryIsNormalized() {
@@ -255,6 +269,6 @@ class AttachmentModelsTest {
                     expiry = "7d",
                 ),
             )
-        assertEquals(listOf("secret" to "", "expires" to "7d"), multipart0x0Fields(config))
+        assertEquals(listOf("secret" to "", "expires" to "168"), multipart0x0Fields(config))
     }
 }

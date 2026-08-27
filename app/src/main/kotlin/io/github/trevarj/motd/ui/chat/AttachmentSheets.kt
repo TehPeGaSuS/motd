@@ -83,6 +83,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.attachment.AVAILABLE_ATTACHMENT_BACKENDS
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
@@ -122,7 +123,7 @@ internal fun uploadDestinations(
     config: PasteBackendConfig,
     sojuFileHostAvailable: Boolean = false,
 ): List<UploadDestination> =
-    AttachmentBackend.entries
+    AVAILABLE_ATTACHMENT_BACKENDS
         .filter { backend ->
             backend.supports(source) &&
                 (backend != AttachmentBackend.SOJU_FILEHOST || sojuFileHostAvailable)
@@ -291,7 +292,8 @@ fun AttachmentSheets(
 
         is AttachmentFlow.Confirm -> {
             ConfirmationSheet(
-                request = current,
+                source = current.source,
+                config = current.config,
                 sojuFileHostAvailable = sojuFileHostAvailable,
                 onChangeDestination = {
                     backendPickerRequest = current
@@ -545,76 +547,99 @@ private fun TextPasteSheet(
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun ConfirmationSheet(
-    request: AttachmentFlow.Confirm,
+internal fun ConfirmationSheet(
+    source: AttachmentSource,
+    config: PasteBackendConfig,
     sojuFileHostAvailable: Boolean,
     onChangeDestination: () -> Unit,
     onDismiss: () -> Unit,
     onUpload: () -> Unit,
 ) {
     val context = LocalContext.current
-    val thumbnail by produceState<android.graphics.Bitmap?>(null, request.source) {
+    val thumbnail by produceState<android.graphics.Bitmap?>(null, source) {
         value =
-            if (request.source is AttachmentSource.Photo) {
+            if (source is AttachmentSource.Photo) {
                 withContext(Dispatchers.IO) {
-                    context.contentResolver.sampledThumbnail(request.source.uri)
+                    context.contentResolver.sampledThumbnail(source.uri)
                 }
             } else {
                 null
             }
     }
-    val sojuUnavailable = request.config.backend == AttachmentBackend.SOJU_FILEHOST && !sojuFileHostAvailable
+    val sojuUnavailable = config.backend == AttachmentBackend.SOJU_FILEHOST && !sojuFileHostAvailable
     ModalBottomSheet(onDismissRequest = onDismiss) {
         SheetSystemBars()
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(12.dp))
-            if (request.source is AttachmentSource.Photo) {
-                // The thumbnail decodes on IO after the sheet is already visible, so ease its
-                // arrival instead of shoving the sheet content down in a single frame. The latched
-                // bitmap keeps the expanding frames painted; no exit spec is needed because the
-                // source key resets the whole confirm state.
-                var lastBitmap by remember(request.source) { mutableStateOf<android.graphics.Bitmap?>(null) }
-                thumbnail?.let { lastBitmap = it }
-                AnimatedVisibility(
-                    visible = thumbnail != null,
-                    enter = fadeIn(MotdMotion.fadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
-                ) {
-                    lastBitmap?.let { bitmap ->
-                        Column {
-                            Image(bitmap.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(20.dp)), contentScale = ContentScale.Crop)
-                            Spacer(Modifier.height(12.dp))
+        Column(Modifier.fillMaxWidth()) {
+            Column(
+                Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(12.dp))
+                if (source is AttachmentSource.Photo) {
+                    // The thumbnail decodes on IO after the sheet is already visible, so ease its
+                    // arrival instead of shoving the sheet content down in a single frame. The latched
+                    // bitmap keeps the expanding frames painted; no exit spec is needed because the
+                    // source key resets the whole confirm state.
+                    var lastBitmap by remember(source) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                    thumbnail?.let { lastBitmap = it }
+                    AnimatedVisibility(
+                        visible = thumbnail != null,
+                        enter = fadeIn(MotdMotion.fadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                    ) {
+                        lastBitmap?.let { bitmap ->
+                            Column {
+                                Image(
+                                    bitmap.asImageBitmap(),
+                                    null,
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(16f / 9f)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .testTag("attachment_thumbnail"),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                Spacer(Modifier.height(12.dp))
+                            }
                         }
                     }
                 }
+                AttachmentMetadata(source)
+                Spacer(Modifier.height(16.dp))
+                Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                ListItem(
+                    headlineContent = { Text(config.backend.label, fontWeight = FontWeight.SemiBold) },
+                    supportingContent = {
+                        Text(
+                            if (sojuUnavailable) {
+                                stringResource(R.string.upload_soju_unavailable)
+                            } else {
+                                backendRetention(config)
+                            },
+                        )
+                    },
+                    trailingContent = { Text(stringResource(R.string.upload_destination_change), color = MaterialTheme.colorScheme.primary) },
+                    modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onChangeDestination),
+                )
+                Spacer(Modifier.height(12.dp))
+                UploadPrivacyCard(config)
+                Spacer(Modifier.height(8.dp))
             }
-            AttachmentMetadata(request.source)
-            Spacer(Modifier.height(16.dp))
-            Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            ListItem(
-                headlineContent = { Text(request.config.backend.label, fontWeight = FontWeight.SemiBold) },
-                supportingContent = {
-                    Text(
-                        if (sojuUnavailable) {
-                            stringResource(R.string.upload_soju_unavailable)
-                        } else {
-                            backendRetention(request.config)
-                        },
-                    )
-                },
-                trailingContent = { Text(stringResource(R.string.upload_destination_change), color = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onChangeDestination),
-            )
-            Spacer(Modifier.height(12.dp))
-            UploadPrivacyCard(request.config)
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = onUpload, enabled = !sojuUnavailable, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Icon(Icons.Outlined.CloudUpload, null)
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.upload_action))
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Button(
+                    onClick = onUpload,
+                    enabled = !sojuUnavailable,
+                    modifier = Modifier.fillMaxWidth().height(52.dp).testTag("attachment_upload"),
+                ) {
+                    Icon(Icons.Outlined.CloudUpload, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.upload_action))
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_cancel)) }
+                Spacer(Modifier.height(12.dp))
             }
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_cancel)) }
-            Spacer(Modifier.height(12.dp))
         }
     }
 }

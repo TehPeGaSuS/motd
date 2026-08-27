@@ -74,7 +74,7 @@ data class PasteBackendConfig(
     val backend: AttachmentBackend = AttachmentBackend.CRAFTERBIN,
     val endpoint: String = EndpointPreset.CRAFTERBIN.endpoint!!,
     val customEndpoint: String = EndpointPreset.CRAFTERBIN.endpoint!!,
-    val expiry: String? = "7d",
+    val expiry: String? = "168",
     val litterboxExpiry: String = DEFAULT_LITTERBOX_EXPIRY,
     val secretUrl: Boolean = true,
     val sizeLimitBytes: Long = DEFAULT_PUBLIC_LIMIT_BYTES,
@@ -144,6 +144,10 @@ fun backendMaxBytes(backend: AttachmentBackend): Long =
 const val MAX_UPLOAD_HISTORY = 20
 const val DEFAULT_LITTERBOX_EXPIRY = "24h"
 val LITTERBOX_EXPIRIES = listOf("1h", "12h", "24h", "72h")
+
+// 0x0.st currently returns HTTP 503 for every upload. Keep the enum for stored-config
+// compatibility, but do not offer a destination that cannot accept files.
+val AVAILABLE_ATTACHMENT_BACKENDS = AttachmentBackend.entries.filterNot { it == AttachmentBackend.ZERO_X_ZERO }
 
 fun validateEndpoint(value: String): String? =
     runCatching {
@@ -245,18 +249,29 @@ fun normalizedConfig(config: PasteBackendConfig): PasteBackendConfig {
         validateEndpoint(config.customEndpoint)
             ?: validateEndpoint(config.endpoint)
             ?: AttachmentBackend.CRAFTERBIN.endpoint!!
-    val backend = config.backend
+    val backend = config.backend.takeUnless { it == AttachmentBackend.ZERO_X_ZERO } ?: AttachmentBackend.CRAFTERBIN
     val endpoint = backend.endpoint ?: customEndpoint
     val maximum = backendMaxBytes(backend)
     return config.copy(
         backend = backend,
         endpoint = endpoint,
         customEndpoint = customEndpoint,
+        expiry = normalizedExpiry(config.expiry),
         litterboxExpiry =
             config.litterboxExpiry.takeIf(LITTERBOX_EXPIRIES::contains)
                 ?: DEFAULT_LITTERBOX_EXPIRY,
         sizeLimitBytes = config.sizeLimitBytes.coerceIn(1, maximum),
     )
+}
+
+private fun normalizedExpiry(value: String?): String? {
+    val expiry = value?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val amount = expiry.dropLast(1).toLongOrNull() ?: return expiry
+    return when (expiry.last().lowercaseChar()) {
+        'd' -> runCatching { Math.multiplyExact(amount, 24L).toString() }.getOrDefault(expiry)
+        'h' -> amount.toString()
+        else -> expiry
+    }
 }
 
 fun PasteBackendConfig.forBackend(backend: AttachmentBackend): PasteBackendConfig = normalizedConfig(copy(backend = backend, endpoint = backend.endpoint ?: customEndpoint))

@@ -322,17 +322,29 @@ class AttachmentUploaderImpl
 
         override suspend fun delete(record: UploadRecord) {
             val token = record.deletionToken ?: throw UploadException("This upload has no deletion token")
-            val connection =
-                connection(record.url, "DELETE").apply {
-                    setRequestProperty(
-                        if (record.backend == AttachmentBackend.CNET) "X-Delete-Key" else "X-Token",
-                        token,
-                    )
+            val payload =
+                if (record.backend == AttachmentBackend.CRAFTERBIN) {
+                    "token=${java.net.URLEncoder.encode(token, StandardCharsets.UTF_8.name())}&delete="
+                        .toByteArray(StandardCharsets.UTF_8)
+                } else {
+                    null
                 }
-            try {
+            val connection =
+                connection(record.url, if (payload == null) "DELETE" else "POST").apply {
+                    if (payload == null) {
+                        setRequestProperty(
+                            if (record.backend == AttachmentBackend.CNET) "X-Delete-Key" else "X-Token",
+                            token,
+                        )
+                    } else {
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                        setFixedLengthStreamingMode(payload.size)
+                    }
+                }
+            executeUpload(connection) {
+                payload?.let { connection.outputStream.use { output -> output.write(it) } }
                 if (connection.responseCode !in 200..299) throw UploadException("Delete failed (HTTP ${connection.responseCode})")
-            } finally {
-                connection.disconnect()
             }
         }
 

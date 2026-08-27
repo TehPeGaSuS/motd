@@ -29,6 +29,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.attachment.AVAILABLE_ATTACHMENT_BACKENDS
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.LITTERBOX_EXPIRIES
@@ -63,7 +64,7 @@ fun UploadsSettingsContent(viewModel: AttachmentSettingsViewModel = hiltViewMode
 
     SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_destination)) {
         Column(Modifier.selectableGroup()) {
-            AttachmentBackend.entries.forEach { backend ->
+            AVAILABLE_ATTACHMENT_BACKENDS.forEach { backend ->
                 RadioRow(
                     label = backend.label,
                     subtitle = backendDescription(backend),

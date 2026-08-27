@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.net.Uri
+import io.github.trevarj.motd.attachment.AVAILABLE_ATTACHMENT_BACKENDS
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.PasteBackendConfig
@@ -16,7 +17,7 @@ class AttachmentUiModelsTest {
     @Test fun textOffersTermbinAndCompatibleDestinations() {
         val options = uploadDestinations(AttachmentSource.Text("hello"), PasteBackendConfig())
         assertEquals(
-            AttachmentBackend.entries.filterNot { it == AttachmentBackend.SOJU_FILEHOST }.map { it.label },
+            AVAILABLE_ATTACHMENT_BACKENDS.filterNot { it == AttachmentBackend.SOJU_FILEHOST }.map { it.label },
             options.map { it.label },
         )
     }
