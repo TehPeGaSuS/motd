@@ -86,6 +86,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -1728,17 +1729,49 @@ class ConnectionManagerImpl
             }
             // A fresh direct socket has no channel membership. Restore only channels whose durable
             // self JOIN state is still true; explicit PART/KICK rows set joined=false. Bouncer children
-            // remain entirely bouncer-managed.
+            // remain entirely bouncer-managed. Some DIRECT-configured endpoints (a WeeChat relay-irc
+            // listener behind a real ircd session, or any other stateful backend not modeled as a
+            // bouncer role) replay a synthetic self JOIN (+332/353/366) for every already-joined
+            // channel unprompted, right after registration. Give those a short window to arrive and
+            // skip re-JOINing what the server already restored. Whatever's left still needs to go out
+            // as few JOIN lines as possible (comma-separated channel lists, IRC allows this) rather
+            // than one command per channel: an unbatched burst of dozens of JOINs queues up behind a
+            // shared connection's own outbound flood control (observed with WeeChat's relay-irc) and
+            // delays unrelated traffic multiplexed over that same connection for up to a minute.
             if (row.role == NetworkRole.DIRECT) {
-                for (channel in recoveryReader.joinedChannels(row.id)) {
-                    if (!isCurrent()) return
-                    val key = inviteEnrollmentStore.channelKey(row.id, client.isupport.normalize(channel))
-                    client.send(
-                        io.github.trevarj.motd.irc.proto.IrcMessage(
-                            command = "JOIN",
-                            params = listOfNotNull(channel, key),
-                        ),
-                    )
+                val remembered = recoveryReader.joinedChannels(row.id)
+                if (remembered.isNotEmpty()) {
+                    val alreadyReplayed = mutableSetOf<String>()
+                    withTimeoutOrNull(JOIN_REPLAY_SETTLE_TIMEOUT_MS) {
+                        client.broadcastEvents
+                            .filterIsInstance<IrcEvent.Joined>()
+                            .filter { it.isSelf }
+                            .collect { alreadyReplayed += client.isupport.normalize(it.channel) }
+                    }
+                    val toJoin = remembered.filter { client.isupport.normalize(it) !in alreadyReplayed }
+                    val (keyed, keyless) =
+                        toJoin.partition {
+                            inviteEnrollmentStore.channelKey(row.id, client.isupport.normalize(it)) != null
+                        }
+                    for (channel in keyed) {
+                        if (!isCurrent()) return
+                        val key = inviteEnrollmentStore.channelKey(row.id, client.isupport.normalize(channel))
+                        client.send(
+                            io.github.trevarj.motd.irc.proto.IrcMessage(
+                                command = "JOIN",
+                                params = listOfNotNull(channel, key),
+                            ),
+                        )
+                    }
+                    for (batch in keyless.chunked(JOIN_BATCH_SIZE)) {
+                        if (!isCurrent()) return
+                        client.send(
+                            io.github.trevarj.motd.irc.proto.IrcMessage(
+                                command = "JOIN",
+                                params = listOf(batch.joinToString(",")),
+                            ),
+                        )
+                    }
                 }
             }
             if (!isCurrent()) return
@@ -3002,6 +3035,25 @@ internal const val HISTORY_CAP_DECISION_TIMEOUT_MS = 15_000L
  * that never answers its CAP REQ must not be able to hold chat entry for the whole Ready session.
  */
 internal const val READ_MARKER_SETTLE_TIMEOUT_MS = 10_000L
+
+/**
+ * How long a DIRECT-role Ready session waits, right after registration, for the server to replay a
+ * synthetic self JOIN of a remembered channel before falling back to self-JOINing it. Some
+ * DIRECT-configured stateful backends (e.g. WeeChat's relay-irc listener) unconditionally mirror
+ * already-joined channels back to a freshly connecting client without being asked; waiting here
+ * avoids firing a redundant, unpaced JOIN burst that would otherwise queue behind that backend's own
+ * outgoing flood control and delay unrelated traffic sharing the same underlying connection.
+ */
+internal const val JOIN_REPLAY_SETTLE_TIMEOUT_MS = 1_500L
+
+/**
+ * Max channels per batched reconnect JOIN line. IRC allows a comma-separated channel list in one
+ * JOIN command; batching keeps a large remembered-channel set (dozens of channels is common on a
+ * bouncer-backed network) to a handful of commands instead of one per channel, which is what
+ * actually avoids tripping a shared connection's outbound flood control. Conservative relative to
+ * the ~512 byte line limit even for long channel names.
+ */
+internal const val JOIN_BATCH_SIZE = 15
 
 /**
  * One Ready session's entry-gate release: the gate opens only when BOTH hold — the caller decided
