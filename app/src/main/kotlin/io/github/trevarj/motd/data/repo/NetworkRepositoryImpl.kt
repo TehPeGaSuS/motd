@@ -72,37 +72,21 @@ class NetworkRepositoryImpl
  *  case-insensitive). Hostnames are ASCII so [lowercase] with the default locale is safe. */
 internal fun normalizeHost(host: String): String = host.trim().trimEnd('.').lowercase()
 
-/** Normalize a network display name for identity comparison: trim and lowercase. */
-internal fun normalizeNetworkName(name: String): String = name.trim().lowercase()
-
-/**
- * True when [name] collides (case-insensitively) with an existing DIRECT/BOUNCER_ROOT network.
- * Lets a caller (the "Add network" form) surface a clear error before [NetworkRepositoryImpl.addNetwork]
- * would otherwise silently reuse that row instead of creating a new one.
- */
-fun networkNameTaken(
-    name: String,
-    existing: List<NetworkEntity>,
-): Boolean {
-    val normalized = normalizeNetworkName(name)
-    return existing.any { it.role != NetworkRole.BOUNCER_CHILD && normalizeNetworkName(it.name) == normalized }
-}
-
 /**
  * Stable identity key deciding whether two [NetworkEntity] rows are the same server, used by
  * [NetworkRepositoryImpl.addNetwork] to reject duplicates. Keyed per role:
  *
  * - **BOUNCER_CHILD**: `(parentId, bouncerNetId)` — a child is one bouncer-side network under one
  *   root, regardless of host (the mirror may not know the host yet). Guards both the onboarding
- *   import loop and the notify-mirror racing to insert the same child. This is an internal sync
- *   mechanism (soju LISTNETWORKS import), not a user-facing add path, so it is untouched by the
- *   name-based scheme below.
- * - **BOUNCER_ROOT** and **DIRECT**: `name` alone. Users are responsible for filling in
- *   host/port/nick/credentials correctly; matching on those fields silently merged distinct rows
- *   that legitimately share an endpoint (e.g. two accounts on the same relay), which read as a
- *   broken "Add network" with no feedback. A duplicate *name* is still rejected so re-running
- *   onboarding for a server the user already added (e.g. picking the Libera preset twice) reuses
- *   the existing row instead of creating a same-named duplicate.
+ *   import loop and the notify-mirror racing to insert the same child.
+ * - **BOUNCER_ROOT**: `(host, port, saslUser)` — one soju account (login) per host:port. Adding
+ *   the same bouncer account twice reuses the existing root.
+ * - **DIRECT**: `(host, port, nick, username, SASL authcid, relay selector?)` — account identity
+ *   keeps multiple logins on one endpoint distinct. CLoak's PASS `user/network:password` and
+ *   WeeChat relays' `network:password` contribute only their non-secret selector.
+ *
+ * A `null` sub-key element is kept distinct (encoded as an empty segment) so under-specified rows
+ * don't collapse onto each other.
  */
 internal fun networkIdentityKey(n: NetworkEntity): String =
     when (n.role) {
@@ -110,7 +94,20 @@ internal fun networkIdentityKey(n: NetworkEntity): String =
             "child|${n.parentId}|${n.bouncerNetId.orEmpty()}"
         }
 
-        NetworkRole.BOUNCER_ROOT, NetworkRole.DIRECT -> {
-            "name|${normalizeNetworkName(n.name)}"
+        NetworkRole.BOUNCER_ROOT -> {
+            "root|${normalizeHost(n.host)}|${n.port}|${n.saslUser.orEmpty()}"
+        }
+
+        NetworkRole.DIRECT -> {
+            // Keep credentials out of the key. SASL authcid and relay PASS prefixes identify the
+            // account/network without retaining either password.
+            val passSelector = n.serverPassword?.let(::serverPasswordSelector).orEmpty()
+            "direct|${normalizeHost(n.host)}|${n.port}|${n.nick}|${n.username}|${n.saslUser.orEmpty()}|$passSelector"
         }
     }
+
+/** Extract a relay's `network` or `user/network` selector without retaining its password. */
+private fun serverPasswordSelector(password: String): String? {
+    val colon = password.indexOf(':')
+    return password.substring(0, colon).takeIf { colon > 0 }
+}

@@ -11,7 +11,6 @@ import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
-import io.github.trevarj.motd.data.repo.networkNameTaken
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.onboarding.AuthForm
@@ -49,8 +48,8 @@ data class AddNetworkUiState(
     val presetId: NetworkPresetId = NetworkPresetId.CUSTOM,
     val showPlaintextWarning: Boolean = false,
     val plaintextConfirmed: Boolean = false,
-    /** True when [submit] rejected this name as already in use by another network. */
-    val nameConflict: Boolean = false,
+    /** True when [submit] resolves to an existing connection instead of creating a new row. */
+    val duplicateConnection: Boolean = false,
 ) {
     val isBouncer: Boolean get() = kind == ConnectionChoice.BOUNCER
     val isSoju: Boolean get() = isBouncer && bouncerKind == BouncerKind.SOJU
@@ -101,7 +100,7 @@ class AddNetworkViewModel
                     presetId = if (kind == ConnectionChoice.NETWORK) _state.value.presetId else NetworkPresetId.CUSTOM,
                     showPlaintextWarning = false,
                     plaintextConfirmed = false,
-                    nameConflict = false,
+                    duplicateConnection = false,
                 )
         }
 
@@ -111,7 +110,7 @@ class AddNetworkViewModel
                     bouncerKind = kind,
                     showPlaintextWarning = false,
                     plaintextConfirmed = false,
-                    nameConflict = false,
+                    duplicateConnection = false,
                 )
         }
 
@@ -124,7 +123,7 @@ class AddNetworkViewModel
                     presetId = if (selected?.matches(server) == true) current.presetId else NetworkPresetId.CUSTOM,
                     showPlaintextWarning = false,
                     plaintextConfirmed = false,
-                    nameConflict = false,
+                    duplicateConnection = false,
                 )
         }
 
@@ -137,7 +136,7 @@ class AddNetworkViewModel
                         presetId = NetworkPresetId.CUSTOM,
                         showPlaintextWarning = false,
                         plaintextConfirmed = false,
-                        nameConflict = false,
+                        duplicateConnection = false,
                     )
                 return
             }
@@ -150,24 +149,24 @@ class AddNetworkViewModel
                     presetId = id,
                     showPlaintextWarning = false,
                     plaintextConfirmed = false,
-                    nameConflict = false,
+                    duplicateConnection = false,
                 )
         }
 
         fun editDisplayName(name: String) {
-            _state.value = _state.value.copy(displayName = name, nameConflict = false)
+            _state.value = _state.value.copy(displayName = name, duplicateConnection = false)
         }
 
         fun editAuth(auth: AuthForm) {
-            _state.value = _state.value.copy(auth = auth)
+            _state.value = _state.value.copy(auth = auth, duplicateConnection = false)
         }
 
         fun editSojuLogin(login: SojuLoginForm) {
-            _state.value = _state.value.copy(sojuLogin = login)
+            _state.value = _state.value.copy(sojuLogin = login, duplicateConnection = false)
         }
 
         fun editZncLogin(login: ZncLoginForm) {
-            _state.value = _state.value.copy(zncLogin = login, nameConflict = false)
+            _state.value = _state.value.copy(zncLogin = login, duplicateConnection = false)
         }
 
         /** Create the row, connect, and observe its live state. */
@@ -200,13 +199,6 @@ class AddNetworkViewModel
                             else -> networkPreset(s.presetId)?.displayName ?: s.server.host
                         }
                     val existingNetworks = networkRepository.observeNetworks().first()
-                    if (networkNameTaken(effectiveName, existingNetworks)) {
-                        // Surface this instead of letting addNetwork's dedup silently reuse the
-                        // existing row: that reconnected an already-live network and closed the
-                        // form with zero feedback, which read as "Save just does nothing."
-                        _state.value = _state.value.copy(nameConflict = true)
-                        return@launch
-                    }
                     val entity =
                         buildNetworkEntity(
                             server = server,
@@ -216,9 +208,13 @@ class AddNetworkViewModel
                         )
                     val existingNetworkIds = existingNetworks.mapTo(mutableSetOf()) { it.id }
                     val networkId = networkRepository.addNetwork(entity)
-                    if (networkId !in existingNetworkIds && s.presetId == NetworkPresetId.LIBERA) {
-                        presetEnrollmentPrefs.markLiberaEligible(networkId)
+                    if (networkId in existingNetworkIds) {
+                        // Do not reconnect and close the form when repository dedup finds this exact
+                        // connection. Keep every field intact so user can change account details.
+                        _state.value = _state.value.copy(duplicateConnection = true)
+                        return@launch
                     }
+                    if (s.presetId == NetworkPresetId.LIBERA) presetEnrollmentPrefs.markLiberaEligible(networkId)
                     _state.value =
                         _state.value.copy(
                             phase = AddNetworkPhase.TESTING,

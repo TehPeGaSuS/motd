@@ -223,6 +223,44 @@ class AddNetworkViewModelTest {
         }
 
     @Test
+    fun duplicate_connection_stays_on_form_without_reconnecting() =
+        runTest {
+            val repo = FakeNetworkRepository()
+            repo.networks[42] =
+                NetworkEntity(
+                    id = 42,
+                    name = "Existing",
+                    role = NetworkRole.DIRECT,
+                    host = "irc.libera.chat",
+                    port = 6697,
+                    nick = "me",
+                    username = "me",
+                    realname = "me",
+                )
+            repo.existingResult = 42
+            val connections = FakeConnectionManager()
+            val vm = vm(repo, connections)
+            vm.fillValidDirect()
+            vm.editDisplayName("Different label")
+            var done = false
+
+            vm.submit(onOpenBouncerNetworks = { error("not a bouncer") }, onDone = { done = true })
+            runCurrent()
+
+            assertTrue(vm.state.value.duplicateConnection)
+            assertEquals(AddNetworkPhase.FORM, vm.state.value.phase)
+            assertEquals(null, vm.state.value.networkId)
+            assertTrue(connections.connected.isEmpty())
+            assertFalse(done)
+
+            vm.editAuth(
+                vm.state.value.auth
+                    .copy(serverPassword = "other:secret"),
+            )
+            assertFalse(vm.state.value.duplicateConnection)
+        }
+
+    @Test
     fun soju_missing_password_or_nick_is_not_submittable() =
         runTest {
             val vm = vm(FakeNetworkRepository(), FakeConnectionManager())

@@ -909,7 +909,7 @@
     <string name="add_network_kind_network">IRC network</string>
     <string name="add_network_kind_bouncer">Bouncer</string>
     <string name="add_network_connect_save">Connect &amp; save</string>
-    <string name="add_network_name_taken">A network with this name already exists. Choose a different name.</string>
+    <string name="add_network_duplicate">This connection already exists. Change its account or network details.</string>
     <string name="add_network_testing">Testing connection…</string>
     <string name="add_network_edit">Edit</string>
     <string name="add_network_save_anyway">Save anyway</string>
