@@ -19,7 +19,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Base64
 import java.util.UUID
+import kotlin.random.Random
 
 class AgentwireDeliveryCoordinatorTest {
     @Test
@@ -58,7 +60,7 @@ class AgentwireDeliveryCoordinatorTest {
                     data =
                         buildJsonObject {
                             put("type", "approval")
-                            put("summary", "x".repeat(12_000))
+                            put("summary", incompressibleText())
                             put("redacted", false)
                             put("inactive", false)
                         },
@@ -112,6 +114,37 @@ class AgentwireDeliveryCoordinatorTest {
         }
 
     @Test
+    fun `compressed one-part hello completes sync instead of reporting protocol mismatch`() {
+        val session = AgentwireSessionOrchestrator()
+        var state = session.beginSync(baseState())
+        session.syncRequested("sync-compressed")
+        val compressedHello =
+            hello("sync-compressed", "epoch-compressed").copy(
+                data =
+                    buildJsonObject {
+                        put("epoch", "epoch-compressed")
+                        put("padding", "x".repeat(12_000))
+                    },
+            )
+        val fragments = fragmentAgentwireEnvelope(compressedHello)
+        assertEquals(1, fragments.size)
+        assertTrue("\"encoding\":\"zlib\"" in fragments.single())
+
+        val helloResult =
+            session.ingest(state, SequencedIrcEvent(1, inboundRaw(fragments.single())))
+                as AgentwireDeliveryCoordinator.Result.Updated
+        state = helloResult.state
+        val snapshotResult =
+            session.ingest(
+                state,
+                SequencedIrcEvent(2, inbound(snapshot("sync-compressed", "epoch-compressed", "session-1", busy = false))),
+            ) as AgentwireDeliveryCoordinator.Result.Updated
+
+        assertTrue(snapshotResult.syncCompleted)
+        assertEquals("epoch-compressed", snapshotResult.state.epoch)
+    }
+
+    @Test
     fun `expired partial envelope starts a new sync before reducing the next live event`() {
         var now = 0L
         val session =
@@ -139,7 +172,7 @@ class AgentwireDeliveryCoordinatorTest {
                     data =
                         buildJsonObject {
                             put("type", "approval")
-                            put("summary", "x".repeat(12_000))
+                            put("summary", incompressibleText())
                             put("redacted", false)
                             put("inactive", false)
                         },
@@ -160,6 +193,8 @@ class AgentwireDeliveryCoordinatorTest {
         assertTrue(state.timeline.isEmpty())
         assertFalse(state.busy)
     }
+
+    private fun incompressibleText(): String = Base64.getEncoder().encodeToString(Random(0).nextBytes(10_000))
 
     private fun baseState() =
         AgentwireUiState(

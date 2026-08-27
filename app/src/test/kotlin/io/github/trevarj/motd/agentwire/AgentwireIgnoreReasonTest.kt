@@ -13,7 +13,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.Base64
 import java.util.UUID
+import kotlin.random.Random
 
 private const val SYNC_ID = "11111111-1111-4111-8111-111111111111"
 
@@ -80,7 +82,8 @@ class AgentwireIgnoreReasonTest {
 
     @Test
     fun `an incomplete fragment assembly is pending, not lost`() {
-        val big = event("request.opened", data = buildJsonObject { put("summary", "x".repeat(12_000)) })
+        val summary = Base64.getEncoder().encodeToString(Random(0).nextBytes(10_000))
+        val big = event("request.opened", data = buildJsonObject { put("summary", summary) })
         val first = fragmentAgentwireEnvelope(big).first()
         assertEquals(IgnoreReason.FRAGMENT_PENDING, why(state(), inboundRaw("agent", first)))
     }

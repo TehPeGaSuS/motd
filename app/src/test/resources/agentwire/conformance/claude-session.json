@@ -13,10 +13,11 @@
         "requests": {},
         "settings": {},
         "sid": null,
+        "subagents": [],
         "tid": null,
         "tools": {}
       },
-      "tag": "{\"at\":1785400000001,\"data\":{\"actions\":[\"sync.request\",\"workspace.list.request\",\"session.list.request\",\"history.request\",\"session.create\",\"session.attach\",\"session.detach\",\"settings.update\",\"turn.prompt\",\"turn.steer\",\"turn.cancel\",\"queue.edit\",\"queue.move\",\"queue.delete\",\"queue.clear\",\"request.respond\",\"request.skip\"],\"backend\":\"claude\",\"capabilities\":[\"history\",\"queues\",\"requests\",\"sessions\",\"settings\",\"steering\",\"sync\",\"turns\",\"workspaces\"],\"epoch\":\"epoch-conformance\",\"limits\":{\"contentBytes\":65536,\"historyBytes\":524288,\"historyDays\":30,\"historyEvents\":200,\"queueItems\":10},\"protocol\":\"agentwire-irc-v1\",\"settings\":[\"delivery\"]},\"epoch\":\"epoch-conformance\",\"id\":\"00000001-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"agent.hello\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000001,\"data\":{\"actions\":[\"sync.request\",\"workspace.list.request\",\"session.list.request\",\"history.request\",\"session.create\",\"session.attach\",\"session.detach\",\"settings.update\",\"turn.prompt\",\"turn.steer\",\"turn.cancel\",\"queue.edit\",\"queue.move\",\"queue.delete\",\"queue.clear\",\"request.respond\",\"request.skip\"],\"backend\":\"claude\",\"capabilities\":[\"compressedFragments\",\"history\",\"historyChunks\",\"queues\",\"requests\",\"sessions\",\"settings\",\"steering\",\"sync\",\"turns\",\"workspaces\"],\"epoch\":\"epoch-conformance\",\"limits\":{\"contentBytes\":65536,\"historyBytes\":524288,\"historyChunkBytes\":98304,\"historyDays\":30,\"historyEvents\":200,\"queueItems\":10},\"protocol\":\"agentwire-irc-v1\",\"settings\":[\"delivery\"]},\"epoch\":\"epoch-conformance\",\"id\":\"00000001-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"agent.hello\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "channel.snapshot",
@@ -33,6 +34,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": null,
         "tools": {}
       },
@@ -53,6 +55,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": null,
         "tools": {}
       },
@@ -73,6 +76,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": null,
         "tools": {}
       },
@@ -93,6 +97,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": null,
         "tools": {}
       },
@@ -113,6 +118,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": null,
         "tools": {}
       },
@@ -133,6 +139,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": "turn-1",
         "tools": {}
       },
@@ -153,6 +160,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": "turn-1",
         "tools": {}
       },
@@ -180,6 +188,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": "turn-1",
         "tools": {}
       },
@@ -207,6 +216,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": "turn-1",
         "tools": {
           "call-1": {
@@ -240,6 +250,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": "turn-1",
         "tools": {
           "call-1": {
@@ -294,6 +305,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": "turn-1",
         "tools": {
           "call-1": {
@@ -329,6 +341,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": "turn-1",
         "tools": {
           "call-1": {
@@ -364,6 +377,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": "turn-1",
         "tools": {
           "call-1": {
@@ -404,6 +418,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": "turn-1",
         "tools": {
           "call-1": {
@@ -444,6 +459,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": "turn-1",
         "tools": {
           "call-1": {
@@ -484,6 +500,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": null,
         "tools": {
           "call-1": {
@@ -524,6 +541,7 @@
           "delivery": "queue"
         },
         "sid": "sess-conformance",
+        "subagents": [],
         "tid": null,
         "tools": {
           "call-1": {

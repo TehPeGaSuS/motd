@@ -46,6 +46,8 @@ import javax.inject.Inject
 
 private const val AGENTWIRE_INITIAL_HISTORY_SIZE = 20
 private const val AGENTWIRE_HISTORY_PAGE_SIZE = 50
+private val AGENTWIRE_READ_ACTION_KINDS =
+    setOf("sync.request", "workspace.list.request", "session.list.request", "history.request")
 
 /**
  * Directories of a freshly arrived workspace page that the browser should open: the ones the user
@@ -799,7 +801,7 @@ class AgentwireViewModel
                     sendErrorClass = it::class.java.simpleName
                     false
                 }
-            if (sent && kind != "sync.request") {
+            if (sent && kind !in AGENTWIRE_READ_ACTION_KINDS) {
                 _state.update { it.copy(actionStatus = it.actionStatus + (id to "sent")) }
             }
             return id.takeIf { sent }

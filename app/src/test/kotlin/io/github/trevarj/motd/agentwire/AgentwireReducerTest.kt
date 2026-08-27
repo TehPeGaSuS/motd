@@ -627,6 +627,50 @@ class AgentwireReducerTest {
     }
 
     @Test
+    fun `packed history chunk validates and stages nested events`() {
+        val reducer = AgentwireReducer()
+        val requestId = UUID.randomUUID().toString()
+        val historic =
+            event(
+                "assistant.completed",
+                sid = "s1",
+                tid = "t1",
+                iid = "answer",
+                reply = requestId,
+                history = true,
+                data = buildJsonObject { put("content", "Packed reply") },
+            )
+        var state =
+            reducer.reduce(
+                AgentwireUiState(
+                    activeSid = "s1",
+                    historyLoading = true,
+                    historyRequestId = requestId,
+                    historySid = "s1",
+                ),
+                event(
+                    "history.chunk",
+                    sid = "s1",
+                    reply = requestId,
+                    data = buildJsonObject { put("events", JsonArray(listOf(historic.toJson()))) },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "history.end",
+                    sid = "s1",
+                    reply = requestId,
+                    data = buildJsonObject { put("count", 1) },
+                ),
+            )
+
+        assertEquals(listOf("Packed reply"), state.timeline.map { it.body })
+        assertFalse(state.historyLoading)
+    }
+
+    @Test
     fun `a short nonempty history page remains pageable until an empty page`() {
         val reducer = AgentwireReducer()
         val firstRequest = UUID.randomUUID().toString()

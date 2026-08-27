@@ -2,6 +2,7 @@ package io.github.trevarj.motd.agentwire
 
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
 import io.github.trevarj.motd.irc.agentwire.AgentwireTopicParse
+import io.github.trevarj.motd.irc.agentwire.decodeAgentwireEnvelope
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -28,6 +29,7 @@ private val SESSION_OWNED_KINDS =
     setOf(
         "session.snapshot",
         "session.status",
+        "history.chunk",
         "user.prompt",
         "turn.started",
         "turn.completed",
@@ -40,6 +42,25 @@ private val SESSION_OWNED_KINDS =
         "tool.completed",
         "usage.updated",
         "subagent.updated",
+        "request.opened",
+        "request.resolved",
+        "approval.review.started",
+        "approval.review.completed",
+    )
+
+private val HISTORY_EVENT_KINDS =
+    setOf(
+        "turn.started",
+        "user.prompt",
+        "turn.completed",
+        "turn.failed",
+        "assistant.delta",
+        "assistant.completed",
+        "plan.updated",
+        "tool.started",
+        "tool.updated",
+        "tool.completed",
+        "usage.updated",
         "request.opened",
         "request.resolved",
         "approval.review.started",
@@ -419,6 +440,24 @@ class AgentwireReducer {
                     )
                 } else {
                     state
+                }
+            }
+
+            "history.chunk" -> {
+                if (!matchesHistoryRequest(state, envelope)) return state
+                val events = data.array("events") ?: error("history chunk events must be an array")
+                events.fold(state) { current, element ->
+                    val historic =
+                        decodeAgentwireEnvelope(element as? JsonObject ?: error("history chunk event must be an object"))
+                            .getOrThrow()
+                    require(
+                        historic.type == "event" &&
+                            historic.kind in HISTORY_EVENT_KINDS &&
+                            historic.history == true &&
+                            historic.sid == envelope.sid &&
+                            historic.reply == envelope.reply,
+                    ) { "history chunk event metadata does not match its page" }
+                    reduce(current, historic)
                 }
             }
 

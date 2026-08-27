@@ -14,6 +14,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import java.security.MessageDigest
+import java.util.Base64
+import kotlin.random.Random
 
 class AgentwireProtocolTest {
     @Test
@@ -83,6 +85,7 @@ class AgentwireProtocolTest {
             "hello.json",
             "prompt-action.json",
             "claude-hello.json",
+            "pi-hello.json",
             "observed-status.json",
             "subagent-update.json",
         ).forEach { name ->
@@ -159,7 +162,7 @@ class AgentwireProtocolTest {
 
     @Test
     fun `fragmented envelope reassembles out of order and tolerates exact duplicate`() {
-        val envelope = event(content = "λ".repeat(8_000))
+        val envelope = event(content = incompressibleText())
         val fragments =
             fragmentAgentwireEnvelope(envelope).map { raw ->
                 (decodeAgentwireValue(raw).getOrThrow() as AgentwireValue.Fragment).value
@@ -175,9 +178,20 @@ class AgentwireProtocolTest {
     }
 
     @Test
+    fun `compressed envelope uses one bounded fragment and reassembles`() {
+        val envelope = event(content = "λ".repeat(8_000))
+        val fragments = fragmentAgentwireEnvelope(envelope)
+        assertEquals(1, fragments.size)
+        val fragment = (decodeAgentwireValue(fragments.single()).getOrThrow() as AgentwireValue.Fragment).value
+        assertEquals("zlib", fragment.encoding)
+        assertEquals(envelope, AgentwireReassembler().accept(fragment).getOrThrow())
+        assertTrue(AgentwireReassembler().accept(fragment.copy(bytes = 1)).isFailure)
+    }
+
+    @Test
     fun `conflicting duplicate invalidates assembly`() {
         val fragments =
-            fragmentAgentwireEnvelope(event("x".repeat(10_000))).map {
+            fragmentAgentwireEnvelope(event(incompressibleText())).map {
                 (decodeAgentwireValue(it).getOrThrow() as AgentwireValue.Fragment).value
             }
         val reassembler = AgentwireReassembler()
@@ -199,8 +213,10 @@ class AgentwireProtocolTest {
 
     @Test
     fun `copied canonical resources match upstream content hashes`() {
-        assertEquals("892530f71a98f4e89dd48eb68562b33501b0b1d21da18496a373cffc595bc22e", sha(resourceBytes("agentwire/agentwire-v1.schema.json")))
-        assertEquals("11061874c62b58eb1c82bbdddc9d6db398f6d2ab6c274e82db5a401a2d634b95", sha(resourceBytes("agentwire/fixtures/hello.json")))
+        assertEquals("ccaf9de2a571952036abbfd48e29f0c8f50a05f08edde12056903a30b86718a7", sha(resourceBytes("agentwire/agentwire-v1.schema.json")))
+        assertEquals("966305fc7e635122c98c3b272666bf1e425c9d2a09f17fe12a7f2de959d52e7a", sha(resourceBytes("agentwire/fixtures/hello.json")))
+        assertEquals("81d2de30a1eb81f391ce003ba529555a3ba0b9aaf6556f115d3e7b232933d42b", sha(resourceBytes("agentwire/fixtures/claude-hello.json")))
+        assertEquals("2b37531bcf2780315f1735d7d35995580e2a32983fcbee07691a8d3fe0f11db4", sha(resourceBytes("agentwire/fixtures/pi-hello.json")))
         assertEquals("e354c350de1de04cf396aa595c90c46658db9e72b381fc54b7f7559ee7f38465", sha(resourceBytes("agentwire/fixtures/prompt-action.json")))
         assertEquals("24c6fed5b79f794b3f31f8ede35b199fbe6746bc24311b4a50d08aeacbb26c03", sha(resourceBytes("agentwire/fixtures/observed-status.json")))
         assertEquals("be00b7e2f858801ddb9fca1b2c33d090c20d45141b0e82c5ee1f55e2078e6b23", sha(resourceBytes("agentwire/fixtures/subagent-update.json")))
@@ -218,6 +234,8 @@ class AgentwireProtocolTest {
             sid = "session",
             data = buildJsonObject { put("content", content) },
         )
+
+    private fun incompressibleText(): String = Base64.getEncoder().encodeToString(Random(0).nextBytes(10_000))
 
     private fun assertFailure(raw: String) {
         if (decodeAgentwireValue(raw).isSuccess) fail("expected validation failure: $raw")

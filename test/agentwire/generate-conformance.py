@@ -19,6 +19,7 @@ from __future__ import annotations
 import copy
 import json
 import pathlib
+import random
 
 from agentwire.protocol import Envelope, encode_envelope, fragment_envelope
 from agentwire.reference_client import ProtocolClient
@@ -60,8 +61,8 @@ def claude_session() -> list[Envelope]:
                 "backend": "claude",
                 "epoch": EPOCH,
                 "capabilities": [
-                    "history", "queues", "requests", "sessions", "settings",
-                    "steering", "sync", "turns", "workspaces",
+                    "compressedFragments", "history", "historyChunks", "queues", "requests",
+                    "sessions", "settings", "steering", "sync", "turns", "workspaces",
                 ],
                 # The live bridge advertises `actions`, and motd gates every outbound
                 # action on it. The abridged upstream fixtures omit it, so a corpus
@@ -78,6 +79,7 @@ def claude_session() -> list[Envelope]:
                     "queueItems": 10,
                     "historyEvents": 200,
                     "historyBytes": 524288,
+                    "historyChunkBytes": 98304,
                     "historyDays": 30,
                 },
                 # Claude takes its model from deployment config, so it accepts delivery alone.
@@ -286,13 +288,14 @@ def main() -> int:
         path.write_text(json.dumps({"topic": TOPIC, "steps": steps}, indent=2, sort_keys=True) + "\n")
         print(f"wrote {path} ({len(steps)} steps)")
 
-    # A payload large enough to force base64url fragmentation on both sides.
+    # Deterministic incompressible text keeps this a multi-part fixture now that the
+    # protocol compresses only when doing so saves an IRC command.
     big = envelope(
         "assistant.completed",
         session_id=SESSION,
         turn_id=TURN,
         item_id="msg-big",
-        data={"content": "λ" * 8000},
+        data={"content": random.Random(0).randbytes(10_000).hex()},
     )
     fragments = fragment_envelope(big)
     assert len(fragments) > 1, "expected the oversized envelope to fragment"

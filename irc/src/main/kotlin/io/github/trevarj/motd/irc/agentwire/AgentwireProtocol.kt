@@ -18,6 +18,8 @@ import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
+import java.util.zip.Deflater
+import java.util.zip.Inflater
 
 const val AGENTWIRE_TAG = "+trevarj.github.io/agentwire"
 const val AGENTWIRE_TOPIC_PREFIX = "agentwire:v1;"
@@ -79,6 +81,7 @@ val AGENTWIRE_EVENT_KINDS =
         "workspace.page",
         "session.page",
         "history.begin",
+        "history.chunk",
         "history.end",
         "action.accepted",
         "action.succeeded",
@@ -277,6 +280,7 @@ data class AgentwireFragment(
     val parts: Int,
     val bytes: Int,
     val sha256: String,
+    val encoding: String?,
     val b64: String,
 )
 
@@ -328,6 +332,7 @@ private val fragmentKeys =
         "parts",
         "bytes",
         "sha256",
+        "encoding",
         "b64",
     )
 private val uuidPattern = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -341,6 +346,8 @@ fun decodeAgentwireValue(raw: String): Result<AgentwireValue> =
             AgentwireValue.Envelope(validateEnvelope(root))
         }
     }
+
+fun decodeAgentwireEnvelope(root: JsonObject): Result<AgentwireEnvelope> = runCatching { validateEnvelope(root) }
 
 fun encodeAgentwireEnvelope(envelope: AgentwireEnvelope): String {
     validateEnvelope(envelope.toJson())
@@ -395,10 +402,12 @@ private fun validateFragment(root: JsonObject): AgentwireFragment {
     val part = root.int("part") ?: error("missing part")
     val parts = root.int("parts") ?: error("missing parts")
     val bytes = root.int("bytes") ?: error("missing bytes")
-    require(parts in 2..MAX_FRAGMENTS && part in 0 until parts) { "invalid fragment position" }
+    require(parts in 1..MAX_FRAGMENTS && part in 0 until parts) { "invalid fragment position" }
     require(bytes in 1..MAX_ENVELOPE_BYTES) { "invalid fragment byte count" }
     val sha = root.string("sha256") ?: error("missing sha256")
     require(sha.matches(Regex("[0-9a-f]{64}"))) { "invalid sha256" }
+    val encoding = root.optionalNonEmptyString("encoding")
+    require(encoding == null || encoding == "zlib") { "unsupported fragment encoding" }
     val b64 = root.string("b64") ?: error("missing b64")
     require(b64.isNotEmpty() && b64.matches(Regex("[A-Za-z0-9_-]+"))) { "invalid b64" }
     return AgentwireFragment(
@@ -411,6 +420,7 @@ private fun validateFragment(root: JsonObject): AgentwireFragment {
         parts,
         bytes,
         sha,
+        encoding,
         b64,
     )
 }
@@ -421,9 +431,14 @@ fun fragmentAgentwireEnvelope(envelope: AgentwireEnvelope): List<String> {
     val bytes = encoded.toByteArray(Charsets.UTF_8)
     require(bytes.size <= MAX_ENVELOPE_BYTES) { "envelope exceeds 128 KiB" }
     val digest = bytes.sha256()
-    val b64 = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+    val compressed = bytes.deflate()
     var chunkSize = directValueBudget() - 360
     while (chunkSize > 0) {
+        val rawParts = fragmentCount(bytes, chunkSize)
+        val compressedParts = fragmentCount(compressed, chunkSize)
+        val encoding = "zlib".takeIf { compressedParts < rawParts }
+        val payload = if (encoding == null) bytes else compressed
+        val b64 = Base64.getUrlEncoder().withoutPadding().encodeToString(payload)
         val chunks = b64.chunked(chunkSize)
         require(chunks.size <= MAX_FRAGMENTS) { "envelope requires more than 64 fragments" }
         val values =
@@ -441,6 +456,7 @@ fun fragmentAgentwireEnvelope(envelope: AgentwireEnvelope): List<String> {
                         put("parts", chunks.size)
                         put("bytes", bytes.size)
                         put("sha256", digest)
+                        encoding?.let { put("encoding", it) }
                         put("b64", chunk)
                     }
                 wireJson.encodeToString(JsonElement.serializer(), sorted(fragment))
@@ -477,6 +493,7 @@ class AgentwireReassembler(
                     fragment.type,
                     fragment.epoch,
                     fragment.sid,
+                    fragment.encoding,
                 )
             val current = assemblies[fragment.id]
             val assembly =
@@ -501,7 +518,8 @@ class AgentwireReassembler(
             assembly.parts[fragment.part] = fragment.b64
             if (assembly.parts.any { it == null }) return@runCatching null
             assemblies.remove(fragment.id)
-            val decoded = Base64.getUrlDecoder().decode(assembly.parts.joinToString(""))
+            val packed = Base64.getUrlDecoder().decode(assembly.parts.joinToString(""))
+            val decoded = if (fragment.encoding == "zlib") packed.inflate(fragment.bytes) else packed
             require(decoded.size == fragment.bytes) { "fragment byte count mismatch" }
             require(decoded.sha256() == fragment.sha256) { "fragment digest mismatch" }
             val text =
@@ -524,6 +542,59 @@ class AgentwireReassembler(
     fun expire(): Boolean {
         val cutoff = now() - FRAGMENT_TIMEOUT_MS
         return assemblies.entries.removeAll { it.value.firstAt < cutoff }
+    }
+}
+
+private fun fragmentCount(
+    payload: ByteArray,
+    chunkSize: Int,
+): Int {
+    val encodedBytes =
+        Base64
+            .getUrlEncoder()
+            .withoutPadding()
+            .encode(payload)
+            .size
+    return maxOf(1, (encodedBytes + chunkSize - 1) / chunkSize)
+}
+
+private fun ByteArray.deflate(): ByteArray {
+    val deflater = Deflater(Deflater.BEST_SPEED)
+    return try {
+        deflater.setInput(this)
+        deflater.finish()
+        val output = ByteArrayOutputStream(size)
+        val buffer = ByteArray(8_192)
+        while (!deflater.finished()) {
+            output.write(buffer, 0, deflater.deflate(buffer))
+        }
+        output.toByteArray()
+    } finally {
+        deflater.end()
+    }
+}
+
+private fun ByteArray.inflate(expectedBytes: Int): ByteArray {
+    val inflater = Inflater()
+    return try {
+        inflater.setInput(this)
+        val output = ByteArrayOutputStream(expectedBytes)
+        val buffer = ByteArray(8_192)
+        var total = 0
+        while (!inflater.finished()) {
+            val count = inflater.inflate(buffer)
+            if (count == 0) {
+                require(inflater.finished()) { "invalid compressed fragment stream" }
+                continue
+            }
+            total += count
+            require(total <= expectedBytes) { "compressed fragment exceeds declared size" }
+            output.write(buffer, 0, count)
+        }
+        require(inflater.remaining == 0 && total == expectedBytes) { "compressed fragment size mismatch" }
+        output.toByteArray()
+    } finally {
+        inflater.end()
     }
 }
 

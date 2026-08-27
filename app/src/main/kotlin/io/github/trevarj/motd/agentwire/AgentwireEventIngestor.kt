@@ -134,7 +134,11 @@ internal class AgentwireEventIngestor(
             return Result.Ignored(IgnoreReason.EPOCH_MISMATCH)
         }
         if (!accept(envelope)) return Result.Ignored(IgnoreReason.FILTERED)
-        return Result.Applied(reducer.reduce(candidate, envelope), envelope)
+        val reduced =
+            runCatching { reducer.reduce(candidate, envelope) }.getOrElse {
+                return protocolFailure(candidate, "Invalid Agentwire event data: ${it.message}")
+            }
+        return Result.Applied(reduced, envelope)
     }
 
     private fun untrusted(
