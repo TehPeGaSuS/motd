@@ -5,6 +5,7 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.audio.NetworkMediaRoute
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.obfs.VlessLink
@@ -218,19 +219,27 @@ class AttachmentUploaderImpl
                         .takeIf { it.obfsMode == ObfsMode.EMBEDDED_REALITY }
                         ?.let { VlessLink.parse(it.obfsLink.orEmpty()).getOrNull()?.host }
                 val endpoint =
-                    when (
-                        val advertised = sojuFileHostEndpoint(ready.isupport, route.endpoint.host, tunnelHost)
+                    if (
+                        route.endpoint.role == NetworkRole.BOUNCER_ROOT &&
+                        route.endpoint.obfsMode == ObfsMode.EMBEDDED_REALITY
                     ) {
-                        is SojuFileHostEndpoint.Usable -> {
-                            advertised.url
-                        }
+                        // This Soju already received the same credential over IRC. Its external
+                        // FILEHOST cannot share the internal Docker host used through REALITY.
+                        httpsUploadUri(ready.isupport[SOJU_FILEHOST_TOKEN])?.toString()
+                            ?: throw UploadException("This IRC network is not advertising a Soju file host.")
+                    } else {
+                        when (val advertised = sojuFileHostEndpoint(ready.isupport, route.endpoint.host, tunnelHost)) {
+                            is SojuFileHostEndpoint.Usable -> {
+                                advertised.url
+                            }
 
-                        is SojuFileHostEndpoint.OffHost -> {
-                            throw UploadException(sojuOffHostMessage(advertised))
-                        }
+                            is SojuFileHostEndpoint.OffHost -> {
+                                throw UploadException(sojuOffHostMessage(advertised))
+                            }
 
-                        SojuFileHostEndpoint.Unavailable -> {
-                            throw UploadException("This IRC network is not advertising a Soju file host.")
+                            SojuFileHostEndpoint.Unavailable -> {
+                                throw UploadException("This IRC network is not advertising a Soju file host.")
+                            }
                         }
                     }
                 val acceptPost = probeAcceptPost(route, endpoint)

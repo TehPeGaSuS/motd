@@ -84,6 +84,18 @@ class SojuFileHostBindingTest {
         assertTrue("the upload never reached the configured VLESS host", probe.connections() > 0)
     }
 
+    @Test fun embeddedBouncerMayUseItsExternalFileHost() {
+        assertThrows(IOException::class.java) {
+            uploadText(
+                advertised = "https://127.0.0.1:${probe.port}/uploads",
+                networkHost = "soju",
+                vlessHost = "192.0.2.1",
+                role = NetworkRole.BOUNCER_ROOT,
+            )
+        }
+        assertTrue("the upload never reached the bouncer's advertised file host", probe.connections() > 0)
+    }
+
     @Test fun networkWithoutAFileHostIsRefusedWithoutNamingAHost() {
         val error =
             assertThrows(UploadException::class.java) {
@@ -97,13 +109,14 @@ class SojuFileHostBindingTest {
         advertised: String?,
         networkHost: String,
         vlessHost: String? = null,
+        role: NetworkRole = NetworkRole.DIRECT,
     ) = runBlocking {
         val isupport = advertised?.let { mapOf(SOJU_FILEHOST_TOKEN to it) }.orEmpty()
         val uploader =
             AttachmentUploaderImpl(
                 ApplicationProvider.getApplicationContext<Context>(),
                 FakeConnectionManager(IrcClientState.Ready("me", emptySet(), isupport)),
-                MediaRouteResolver { id -> route(id, networkHost, vlessHost) },
+                MediaRouteResolver { id -> route(id, networkHost, vlessHost, role) },
             )
         uploader
             .upload(
@@ -117,13 +130,14 @@ class SojuFileHostBindingTest {
         networkId: Long,
         host: String,
         vlessHost: String?,
+        role: NetworkRole,
     ) = NetworkMediaRoute(
         networkId = networkId,
         endpoint =
             NetworkEntity(
                 id = networkId,
                 name = "net",
-                role = NetworkRole.DIRECT,
+                role = role,
                 host = host,
                 port = 6697,
                 nick = "me",
