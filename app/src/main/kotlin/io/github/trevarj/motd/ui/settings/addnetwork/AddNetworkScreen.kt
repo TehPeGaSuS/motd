@@ -69,11 +69,14 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 @Composable
 fun AddNetworkScreen(
     onBack: () -> Unit = {},
-    onOpenBouncerNetworks: (Long) -> Unit = {},
+    onOpenBouncerNetworks: (Long, Boolean) -> Unit = { _, _ -> },
     onScanInvite: () -> Unit = {},
     viewModel: AddNetworkViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val openBouncerNetworks = { rootId: Long ->
+        onOpenBouncerNetworks(rootId, viewModel.state.value.provisionalCreated)
+    }
     AddNetworkContent(
         state = state,
         onBack = onBack,
@@ -85,12 +88,12 @@ fun AddNetworkScreen(
         onAuthChange = viewModel::editAuth,
         onSojuLoginChange = viewModel::editSojuLogin,
         onZncLoginChange = viewModel::editZncLogin,
-        onSubmit = { viewModel.submit(onOpenBouncerNetworks, onBack) },
-        onRetry = { viewModel.retry(onOpenBouncerNetworks, onBack) },
+        onSubmit = { viewModel.submit(openBouncerNetworks, onBack) },
+        onRetry = { viewModel.retry(openBouncerNetworks, onBack) },
         onSaveAnyway = { viewModel.saveAnyway(onBack) },
         onEditForm = viewModel::editForm,
         onAbandon = { viewModel.abandon(onBack) },
-        onConfirmPlaintext = { viewModel.confirmPlaintext(onOpenBouncerNetworks, onBack) },
+        onConfirmPlaintext = { viewModel.confirmPlaintext(openBouncerNetworks, onBack) },
         onDismissPlaintext = viewModel::dismissPlaintextWarning,
         onScanInvite = onScanInvite,
     )

@@ -424,7 +424,6 @@ class OnboardingViewModelTest {
                 )
             runCurrent()
             vm.selectHistorySyncDepth(HistorySyncDepth.EVERYTHING)
-            vm.toggleBouncerNetwork("libera")
             vm.next()
 
             vm.finish {}

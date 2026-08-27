@@ -72,6 +72,7 @@ data class BouncerControlCallbacks(
     val onSelectTab: (BouncerControlTab) -> Unit = {},
     val onClearFeedback: () -> Unit = {},
     val onToggleImport: (BouncerNetRow) -> Unit = {},
+    val onSetAllImported: (Boolean) -> Unit = {},
     val onCreateNetwork: (NetworkCommandFields) -> Unit = {},
     val onUpdateNetwork: (String, NetworkCommandFields) -> Unit = { _, _ -> },
     val onDeleteNetwork: (BouncerNetRow) -> Unit = {},
@@ -101,10 +102,11 @@ data class BouncerControlCallbacks(
 @Composable
 fun BouncerNetworksScreen(
     rootNetworkId: Long,
+    importAllByDefault: Boolean = false,
     onBack: () -> Unit = {},
     viewModel: BouncerNetworksViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(rootNetworkId) { viewModel.init(rootNetworkId) }
+    LaunchedEffect(rootNetworkId, importAllByDefault) { viewModel.init(rootNetworkId, importAllByDefault) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     BouncerNetworksContent(
         state = state,
@@ -119,6 +121,7 @@ fun BouncerNetworksScreen(
                 onToggleImport = { row ->
                     if (row.childNetworkId == null) viewModel.importNetwork(row) else viewModel.removeLocal(row)
                 },
+                onSetAllImported = viewModel::setAllImported,
                 onCreateNetwork = viewModel::createNetwork,
                 onUpdateNetwork = viewModel::updateNetwork,
                 onDeleteNetwork = viewModel::deleteFromBouncer,
@@ -321,6 +324,18 @@ private fun NetworksPanel(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        if (state.rows.isNotEmpty()) {
+            item {
+                val allImported = state.rows.all { it.childNetworkId != null }
+                TextButton(
+                    onClick = { callbacks.onSetAllImported(!allImported) },
+                    enabled = enabled && !state.commandBusy,
+                    modifier = Modifier.testTag("bouncer_toggle_all"),
+                ) {
+                    Text(stringResource(if (allImported) R.string.action_unselect_all else R.string.action_select_all))
+                }
+            }
         }
         items(state.rows, key = { it.netId }) { row ->
             BouncerRow(

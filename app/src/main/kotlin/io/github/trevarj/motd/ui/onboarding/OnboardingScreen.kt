@@ -747,6 +747,17 @@ private fun BouncerNetworksSection(
             Unit
         }
     }
+    if (state.bouncerNetworks.isNotEmpty()) {
+        val allSelected = state.bouncerNetworks.all { it.selected }
+        TextButton(
+            onClick = {
+                state.bouncerNetworks.filter { it.selected == allSelected }.forEach { onToggleBouncer(it.netId) }
+            },
+            modifier = Modifier.testTag("onboarding_bouncer_toggle_all"),
+        ) {
+            Text(stringResource(if (allSelected) R.string.action_unselect_all else R.string.action_select_all))
+        }
+    }
     Column(Modifier.selectableGroup()) {
         state.bouncerNetworks.forEach { row ->
             Row(

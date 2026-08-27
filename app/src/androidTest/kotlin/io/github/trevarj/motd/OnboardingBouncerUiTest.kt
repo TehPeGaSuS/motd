@@ -25,6 +25,7 @@ import io.github.trevarj.motd.ui.onboarding.OnboardingContent
 import io.github.trevarj.motd.ui.onboarding.OnboardingState
 import io.github.trevarj.motd.ui.onboarding.OnboardingStep
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -56,6 +57,42 @@ class OnboardingBouncerUiTest {
         compose.onAllNodesWithTag("onboarding_bouncer_discovery_error").assertCountEquals(1)
         compose.onNodeWithTag("onboarding_bouncer_discovery_retry").performClick()
         compose.runOnIdle { assertTrue(retried) }
+    }
+
+    @Test
+    fun selectAll_togglesEveryUnselectedNetwork() {
+        val toggled = mutableListOf<String>()
+        content(
+            discovery =
+                BouncerDiscoveryState.Loaded(
+                    listOf(
+                        BouncerNetworkRow("libera", "Libera", selected = false),
+                        BouncerNetworkRow("oftc", "OFTC", selected = false),
+                    ),
+                ),
+            onToggleBouncer = toggled::add,
+        )
+
+        compose.onNodeWithTag("onboarding_bouncer_toggle_all").assertTextContains("Select all").performClick()
+        compose.runOnIdle { assertEquals(listOf("libera", "oftc"), toggled) }
+    }
+
+    @Test
+    fun unselectAll_togglesEverySelectedNetwork() {
+        val toggled = mutableListOf<String>()
+        content(
+            discovery =
+                BouncerDiscoveryState.Loaded(
+                    listOf(
+                        BouncerNetworkRow("libera", "Libera", selected = true),
+                        BouncerNetworkRow("oftc", "OFTC", selected = true),
+                    ),
+                ),
+            onToggleBouncer = toggled::add,
+        )
+
+        compose.onNodeWithTag("onboarding_bouncer_toggle_all").assertTextContains("Unselect all").performClick()
+        compose.runOnIdle { assertEquals(listOf("libera", "oftc"), toggled) }
     }
 
     @Test
@@ -125,6 +162,7 @@ class OnboardingBouncerUiTest {
         draft: BouncerAddDraft = BouncerAddDraft(),
         add: BouncerAddState = BouncerAddState.Idle,
         onRetryDiscovery: () -> Unit = {},
+        onToggleBouncer: (String) -> Unit = {},
     ) {
         compose.setContent {
             MotdTheme {
@@ -142,7 +180,7 @@ class OnboardingBouncerUiTest {
                     onZncLoginChange = {},
                     onRetry = {},
                     onRetryBouncerDiscovery = onRetryDiscovery,
-                    onToggleBouncer = {},
+                    onToggleBouncer = onToggleBouncer,
                     onBouncerAddDraftChange = {},
                     onAddBouncer = {},
                     onSelectHistoryDepth = {},

@@ -317,6 +317,8 @@
     <string name="action_dismiss">Dismiss</string>
     <string name="action_enable">Enable</string>
     <string name="action_disable">Disable</string>
+    <string name="action_select_all">Select all</string>
+    <string name="action_unselect_all">Unselect all</string>
     <string name="action_send">Send</string>
 
     <!-- Search (WP8) -->

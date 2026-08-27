@@ -133,6 +133,7 @@ data class BouncerNetworkRow(
     val netId: String,
     val name: String,
     val selected: Boolean,
+    val selectionExplicit: Boolean = false,
 )
 
 /** LISTNETWORKS request state. Rows remain available while a refresh or retry is in flight. */
@@ -573,7 +574,11 @@ fun onboardingReducer(
         is OnboardingAction.ToggleBouncerNetwork -> {
             state.withBouncerRows(
                 state.bouncerNetworks.map {
-                    if (it.netId == action.netId) it.copy(selected = !it.selected) else it
+                    if (it.netId == action.netId) {
+                        it.copy(selected = !it.selected, selectionExplicit = true)
+                    } else {
+                        it
+                    }
                 },
             )
         }
@@ -604,7 +609,11 @@ fun onboardingReducer(
                 state
             } else {
                 state.withBouncerRows(
-                    rows = mergeBouncerNetworkRows(state.bouncerNetworks, listOf(action.row)),
+                    rows =
+                        mergeBouncerNetworkRows(
+                            state.bouncerNetworks,
+                            listOf(action.row.copy(selectionExplicit = true)),
+                        ),
                     addState = BouncerAddState.Success,
                     // Clearing is exclusively part of the accepted ADD transition, so recomposition
                     // and passive snapshots cannot erase a failed draft or clear success twice.
@@ -630,10 +639,15 @@ private fun mergeBouncerNetworkRows(
     existing: List<BouncerNetworkRow>,
     incoming: List<BouncerNetworkRow>,
 ): List<BouncerNetworkRow> {
-    val selected = existing.filter { it.selected }.associateBy { it.netId }
+    val existingById = existing.associateBy { it.netId }
     val incomingIds = incoming.mapTo(mutableSetOf()) { it.netId }
-    return incoming.map { row -> row.copy(selected = row.selected || row.netId in selected) } +
-        selected.values.filter { it.netId !in incomingIds }
+    return incoming.map { row ->
+        val prior = existingById[row.netId]
+        row.copy(
+            selected = prior?.selected ?: true,
+            selectionExplicit = prior?.selectionExplicit ?: row.selectionExplicit,
+        )
+    } + existing.filter { it.selected && it.selectionExplicit && it.netId !in incomingIds }
 }
 
 private fun OnboardingState.withBouncerRows(

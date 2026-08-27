@@ -13,7 +13,6 @@ import io.github.trevarj.motd.bouncer.NetworkCommandFields
 import io.github.trevarj.motd.bouncer.UserCommandFields
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.NetworkEntity
-import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
@@ -60,14 +59,20 @@ class BouncerNetworksViewModel
 
         private var rootNetworkId: Long = 0
         private var initialized = false
+        private var autoImportPending = false
 
-        fun init(rootNetworkId: Long) {
+        fun init(
+            rootNetworkId: Long,
+            importAllByDefault: Boolean = false,
+        ) {
             if (initialized) return
             initialized = true
             this.rootNetworkId = rootNetworkId
+            autoImportPending = importAllByDefault
             viewModelScope.launch {
                 val root = networkRepository.networkById(rootNetworkId)
                 _state.update { current -> current.copy(root = root) }
+                if (autoImportPending && _state.value.rootState is IrcClientState.Ready) refreshInline()
             }
             viewModelScope.launch {
                 messageDao.observeBouncerTranscript(rootNetworkId).collectLatest { rows ->
@@ -112,21 +117,8 @@ class BouncerNetworksViewModel
         fun importNetwork(row: BouncerNetRow) =
             viewModelScope.launch {
                 val root = _state.value.root ?: return@launch
-                val existing = networkRepository.childrenOf(rootNetworkId)
-                if (existing.any { it.bouncerNetId == row.netId }) {
-                    refreshInline()
-                    return@launch
-                }
-                networkRepository.addNetwork(
-                    root.copy(
-                        id = 0,
-                        name = row.name,
-                        role = NetworkRole.BOUNCER_CHILD,
-                        parentId = root.id,
-                        bouncerNetId = row.netId,
-                        host = row.host ?: root.host,
-                    ),
-                )
+                missingBouncerChildren(root, listOf(row), networkRepository.childrenOf(rootNetworkId))
+                    .forEach { networkRepository.addNetwork(it) }
                 refreshInline()
             }
 
@@ -134,6 +126,20 @@ class BouncerNetworksViewModel
         fun removeLocal(row: BouncerNetRow) =
             viewModelScope.launch {
                 row.childNetworkId?.let { networkRepository.deleteNetwork(it) }
+                refreshInline()
+            }
+
+        fun setAllImported(imported: Boolean) =
+            viewModelScope.launch {
+                val root = _state.value.root ?: return@launch
+                val children = networkRepository.childrenOf(rootNetworkId)
+                if (imported) {
+                    missingBouncerChildren(root, _state.value.rows, children)
+                        .forEach { networkRepository.addNetwork(it) }
+                } else {
+                    children.forEach { networkRepository.deleteNetwork(it.id) }
+                }
+                autoImportPending = false
                 refreshInline()
             }
 
@@ -337,7 +343,14 @@ class BouncerNetworksViewModel
                         return
                     }
                 }
-            val children = networkRepository.childrenOf(rootNetworkId)
+            var children = networkRepository.childrenOf(rootNetworkId)
+            val rows = mergeBouncerRows(listing, children)
+            val root = _state.value.root
+            if (autoImportPending && rows.isNotEmpty() && root != null) {
+                autoImportPending = false
+                missingBouncerChildren(root, rows, children).forEach { networkRepository.addNetwork(it) }
+                children = networkRepository.childrenOf(rootNetworkId)
+            }
             _state.value =
                 _state.value.copy(
                     loading = false,

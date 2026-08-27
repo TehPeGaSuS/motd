@@ -371,14 +371,15 @@ class OnboardingReducerTest {
             )
         assertTrue(listed.bouncerDiscovery is BouncerDiscoveryState.Loaded)
         assertEquals(2, listed.bouncerNetworks.size)
+        assertTrue(listed.bouncerNetworks.all { it.selected })
 
         val toggled = onboardingReducer(listed, OnboardingAction.ToggleBouncerNetwork("1"))
-        assertTrue(toggled.bouncerNetworks.first { it.netId == "1" }.selected)
-        assertFalse(toggled.bouncerNetworks.first { it.netId == "2" }.selected)
+        assertFalse(toggled.bouncerNetworks.first { it.netId == "1" }.selected)
+        assertTrue(toggled.bouncerNetworks.first { it.netId == "2" }.selected)
     }
 
     @Test
-    fun `passive bouncer snapshot preserves selected imports`() {
+    fun `passive bouncer snapshot preserves import selections`() {
         val selected =
             reduce(
                 OnboardingState(step = OnboardingStep.CONNECT, networkId = 1L),
@@ -408,8 +409,8 @@ class OnboardingReducerTest {
                 ),
             )
 
-        assertTrue(refreshed.bouncerNetworks.first { it.netId == "1" }.selected)
-        assertFalse(refreshed.bouncerNetworks.first { it.netId == "3" }.selected)
+        assertFalse(refreshed.bouncerNetworks.first { it.netId == "1" }.selected)
+        assertTrue(refreshed.bouncerNetworks.first { it.netId == "3" }.selected)
     }
 
     @Test
@@ -424,6 +425,7 @@ class OnboardingReducerTest {
                     1L,
                     listOf(BouncerNetworkRow("libera", "Libera", selected = false)),
                 ),
+                OnboardingAction.ToggleBouncerNetwork("libera"),
                 OnboardingAction.ToggleBouncerNetwork("libera"),
             )
 

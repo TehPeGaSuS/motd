@@ -398,8 +398,8 @@ fun MotdNavGraph(
             AddNetworkScreen(
                 onBack = { navController.popBackStack() },
                 onScanInvite = { navController.navigate(QrInviteScannerRoute) },
-                onOpenBouncerNetworks = { rootId ->
-                    navController.navigate(BouncerNetworksRoute(rootId)) {
+                onOpenBouncerNetworks = { rootId, created ->
+                    navController.navigate(BouncerNetworksRoute(rootId, importAllByDefault = created)) {
                         // The add-flow is replaced by the manager once the soju root exists.
                         popUpTo<AddNetworkRoute> { inclusive = true }
                     }
@@ -410,6 +410,7 @@ fun MotdNavGraph(
             val route = entry.toRoute<BouncerNetworksRoute>()
             BouncerNetworksScreen(
                 rootNetworkId = route.rootNetworkId,
+                importAllByDefault = route.importAllByDefault,
                 onBack = { navController.popBackStack() },
             )
         }

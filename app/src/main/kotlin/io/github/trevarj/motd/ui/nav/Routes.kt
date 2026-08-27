@@ -98,6 +98,7 @@ data class NotificationTarget(
 
 @Serializable data class BouncerNetworksRoute(
     val rootNetworkId: Long,
+    val importAllByDefault: Boolean = false,
 )
 
 @Serializable data class ChannelListRoute(

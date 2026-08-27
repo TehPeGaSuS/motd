@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.settings.bouncer
 
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.client.BouncerNetwork
 
 /** One row: a network known to the bouncer, merged with its local mirror (if imported). */
@@ -31,3 +32,22 @@ fun mergeBouncerRows(
             childNetworkId = child?.id,
         )
     }
+
+/** Build local mirrors for listed bouncer networks that have not been imported yet. */
+fun missingBouncerChildren(
+    root: NetworkEntity,
+    rows: List<BouncerNetRow>,
+    children: List<NetworkEntity>,
+): List<NetworkEntity> {
+    val importedNetIds = children.mapTo(mutableSetOf()) { it.bouncerNetId }
+    return rows.filter { it.netId !in importedNetIds }.map { row ->
+        root.copy(
+            id = 0,
+            name = row.name,
+            role = NetworkRole.BOUNCER_CHILD,
+            parentId = root.id,
+            bouncerNetId = row.netId,
+            host = row.host ?: root.host,
+        )
+    }
+}

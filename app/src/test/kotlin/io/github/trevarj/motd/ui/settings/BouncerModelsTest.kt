@@ -3,7 +3,9 @@ package io.github.trevarj.motd.ui.settings
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.client.BouncerNetwork
+import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetRow
 import io.github.trevarj.motd.ui.settings.bouncer.mergeBouncerRows
+import io.github.trevarj.motd.ui.settings.bouncer.missingBouncerChildren
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -75,5 +77,24 @@ class BouncerModelsTest {
                 emptyList(),
             )
         assertEquals(listOf("a", "b"), rows.map { it.netId })
+    }
+
+    @Test
+    fun missing_children_are_enabled_from_the_root_defaults() {
+        val root = child(1, "root").copy(role = NetworkRole.BOUNCER_ROOT, parentId = null)
+        val rows =
+            listOf(
+                BouncerNetRow("existing", "Existing", null, null, 7),
+                BouncerNetRow("new", "New", "irc.new.example", null, null),
+            )
+
+        val children = missingBouncerChildren(root, rows, listOf(child(7, "existing")))
+
+        assertEquals(1, children.size)
+        assertEquals("new", children.single().bouncerNetId)
+        assertEquals("irc.new.example", children.single().host)
+        assertEquals(NetworkRole.BOUNCER_CHILD, children.single().role)
+        assertEquals(root.id, children.single().parentId)
+        assertEquals(true, children.single().autoConnect)
     }
 }
